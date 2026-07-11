@@ -182,6 +182,13 @@ startwebui() {
     # whichever your OpenWebUI version doesn't know is simply ignored.
     if searxng_installed; then
         local searx_query="http://$SEARXNG_LOCAL_HOST:$SEARXNG_LOCAL_PORT/search?q=<query>"
+        # Web-search settings are OpenWebUI "PersistentConfig": by default they
+        # are read from env only on the FIRST boot (fresh DB) and then the DB
+        # value wins forever. ENABLE_PERSISTENT_CONFIG=False makes env
+        # authoritative on every boot, so this actually takes effect on an
+        # existing DB too. (Override with ENABLE_PERSISTENT_CONFIG=True if you
+        # prefer to manage OpenWebUI settings from the UI instead.)
+        export ENABLE_PERSISTENT_CONFIG="${ENABLE_PERSISTENT_CONFIG:-False}"
         export ENABLE_WEB_SEARCH="${ENABLE_WEB_SEARCH:-true}"
         export WEB_SEARCH_ENGINE="${WEB_SEARCH_ENGINE:-searxng}"
         export SEARXNG_QUERY_URL="${SEARXNG_QUERY_URL:-$searx_query}"

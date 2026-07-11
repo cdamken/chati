@@ -258,28 +258,11 @@ else
     fi
 fi
 
-# ---- 8. OpenWebUI (default; skip with --minimal) ----------------------------
-# Install the venv, then start it. The start is NON-FATAL: OpenWebUI's first
-# boot migrates its DB and can be slow, so a timeout must not abort setup —
-# we report where the log is and how to start it, and carry on.
-WEBUI_STARTED=0
-if [[ "$WANT_WEBUI" -eq 1 ]]; then
-    step "Installing OpenWebUI (browser UI)"
-    "$REPO_ROOT/ai_local/ailocal" upgrade webui --force
-    ok "OpenWebUI installed"
-    step "Starting OpenWebUI (first boot can take a minute)"
-    if "$REPO_ROOT/ai_local/ailocal" start webui; then
-        WEBUI_STARTED=1
-        ok "OpenWebUI running at http://127.0.0.1:8888"
-    else
-        warn "OpenWebUI didn't confirm startup in time (it may still be booting)."
-        warn "Check ~/logs/webui.log, or just run: ./ai_local/ailocal start webui"
-    fi
-fi
-
-# ---- 9. SearXNG web search (default; skip with --no-searxng/--minimal) -------
-# Install a personal SearXNG, wire chati's /web to it in .env, and start it.
-# Whole block is NON-FATAL: web search is a bonus, never a reason to fail setup.
+# ---- 8. SearXNG web search (default; skip with --no-searxng/--minimal) -------
+# Installed BEFORE OpenWebUI on purpose: OpenWebUI reads its web-search config
+# from the environment at boot, so SearXNG must already be present when the UI
+# starts for its "search via SearXNG" toggle to come up enabled. Wires chati's
+# /web too. NON-FATAL throughout — web search is a bonus, never fails setup.
 SEARXNG_STARTED=0
 if [[ "$WANT_SEARXNG" -eq 1 ]]; then
     step "Installing local SearXNG (powers /web)"
@@ -307,6 +290,25 @@ if [[ "$WANT_SEARXNG" -eq 1 ]]; then
         fi
     else
         warn "SearXNG install failed (see output above) — /web stays off. Chat and OpenWebUI are unaffected."
+    fi
+fi
+
+# ---- 9. OpenWebUI (default; skip with --minimal) ----------------------------
+# Install the venv, then start it (with SearXNG already up from step 8, so its
+# web search comes up enabled). The start is NON-FATAL: OpenWebUI's first boot
+# migrates its DB and can be slow, so a timeout must not abort setup.
+WEBUI_STARTED=0
+if [[ "$WANT_WEBUI" -eq 1 ]]; then
+    step "Installing OpenWebUI (browser UI)"
+    "$REPO_ROOT/ai_local/ailocal" upgrade webui --force
+    ok "OpenWebUI installed"
+    step "Starting OpenWebUI (first boot can take a minute)"
+    if "$REPO_ROOT/ai_local/ailocal" start webui; then
+        WEBUI_STARTED=1
+        ok "OpenWebUI running at http://127.0.0.1:8888"
+    else
+        warn "OpenWebUI didn't confirm startup in time (it may still be booting)."
+        warn "Check ~/logs/webui.log, or just run: ./ai_local/ailocal start webui"
     fi
 fi
 

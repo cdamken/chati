@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.0.1] - 2026-07-11
+
+### Fixed
+- OpenWebUI's SearXNG web search now actually comes up enabled. Its search
+  settings are OpenWebUI "PersistentConfig" (read from env only on first boot,
+  then DB-authoritative), so on an existing DB the env was ignored. `ailocal`
+  now sets `ENABLE_PERSISTENT_CONFIG=False` so the web-search env is applied on
+  every boot, and `setup.sh` installs SearXNG **before** starting OpenWebUI so
+  it's present when the UI first reads its config.
+
 ## [1.0.0] - 2026-07-11
 
 First public release.
