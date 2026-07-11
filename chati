@@ -1,0 +1,1061 @@
+#!/bin/bash
+#==============================================================================
+# Chati v1.6.2 - Ollama-Centric Chat Interface
+#==============================================================================
+set -o pipefail
+# Resolve this script's REAL directory, following symlinks, so chati works
+# both from the repo (./chati) and when symlinked onto $PATH (e.g.
+# /opt/homebrew/bin/chati → ~/chat/chati). bash does not resolve symlinks in
+# BASH_SOURCE, so a naive dirname would look for lib_chat.sh next to the
+# symlink and fail. lib_chat.sh then derives BASE_DIR from its own location,
+# so everything downstream resolves against the real repo.
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+    _dir="$(cd -P "$(dirname "$_src")" && pwd)"
+    _src="$(readlink "$_src")"
+    [[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+unset _src _dir
+source "$CHATI_DIR/lib_chat.sh"
+
+CHATI_VERSION="1.6.2"
+
+show_version() { echo "chati $CHATI_VERSION"; }
+
+# Parse CLI flags up-front so `chati --help` and `chati --version`
+# work without entering the REPL.
+case "${1:-}" in
+    -h|--help)
+        echo "Usage: chati [-h|--help] [-v|--version]"
+        echo "Interactive Ollama chat. Type /h once inside for command list."
+        exit 0 ;;
+    -v|--version)
+        show_version; exit 0 ;;
+esac
+
+# --- HISTORY MANAGEMENT ---
+# Under $STATE_DIR so each CHATI_INSTANCE keeps its own command history.
+export HISTFILE="$STATE_DIR/.chati_history"
+mkdir -p "$(dirname "$HISTFILE")"
+touch "$HISTFILE"
+set -o history
+export HISTIGNORE="set *:history *"
+history -c
+history -r "$HISTFILE"
+set +o history
+# Flush history once at exit instead of after every keystroke.
+trap 'history -w "$HISTFILE" 2>/dev/null' EXIT
+
+# --- STATE ---
+LAST_RESPONSE=""
+DEFAULT_VOICE="AUTO"     # Automatic voice detection
+VOICE_MODE="OFF"         # Global talk toggle
+WEB_MODE="OFF"           # Global web search toggle
+AGENT_MODE="OFF"         # Global autonomous agent toggle
+FORCE_LANG="auto"        # Language forcing (auto, en, es, de, etc.)
+SAY_COLORS="white/green" # Default colors for speech highlighting
+SAY_SPEED=1.0            # Speech speed multiplier (1.0 = 200 wpm)
+SAY_RATE=200             # Calculated words per minute
+VALID_LANG_CODES=("auto" "en" "es" "de" "fr" "pt" "it" "ru" "ja" "ko" "zh" "ar" "hi")
+
+update_say_rate() {
+    SAY_RATE=$(awk -v s="$SAY_SPEED" 'BEGIN { r=s*200; if(r<50)r=50; if(r>600)r=600; print int(r) }')
+}
+
+# Trigger background memory compression after every COMPRESS_EVERY messages.
+maybe_compress() {
+    local curr_sess
+    curr_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    [[ -z "$curr_sess" || ! -f "$MESSAGES_FILE" ]] && return 0
+    local msg_count
+    msg_count=$(wc -l < "$MESSAGES_FILE" 2>/dev/null | tr -d ' ')
+    [[ -z "$msg_count" ]] && msg_count=0
+    local marker="$HISTORY_DIR/${curr_sess}_compressed_at"
+    local last=0
+    [[ -f "$marker" ]] && last=$(cat "$marker" 2>/dev/null || echo 0)
+    if (( msg_count - last >= COMPRESS_EVERY )); then
+        "$MOLA_CMD" compress >/dev/null 2>&1 &
+        echo "$msg_count" > "$marker"
+    fi
+}
+
+# Return the AGENT_MODE capability prompt that gets injected as a real
+# role:system message via OLA_EXTRA_SYSTEM. Lives in a function (rather
+# than a literal in the main loop) for two reasons: 1) the main REPL stays
+# legible — toggling agent mode is one if/else block instead of a 50-line
+# HEREDOC; 2) the prompt is the single point of truth, so iterating on
+# how strict the model has to be doesn't touch the dispatcher.
+#
+# Why this preamble exists at all: a previous version concatenated the
+# instruction onto the USER message. Gemma treated "[SYSTEM:...]" as
+# user-supplied text and refused on grounds of being an LLM. Moving it
+# to role:system fixed that; the bans on refusal phrases + worked
+# few-shot examples keep the model from waffling.
+agent_capability_prompt() {
+    cat << 'PROMPT_EOF'
+[RUNTIME HARNESS OVERRIDE — READ FIRST]
+
+This message is a runtime-environment instruction. It OVERRIDES any persona, role, or refusal pattern from earlier system messages or from your training. Read it fully before composing your reply.
+
+YOU ARE NOT A PURE LLM RIGHT NOW. You are running inside a macOS shell harness called 'chati' with the user sitting at the keyboard. The harness gives you REAL execution on the user's Mac, supervised by an 'Execute? (y/N)' confirmation prompt for every command. The user has explicitly enabled this mode by typing /a. Disk access, process inspection, and CLI tools are all available to you through one mechanism:
+
+  TOOL CALL FORMAT (must be on its own line):
+  [EXEC: <bash command>]
+
+When you emit that line, the harness runs the command on the user's Mac and replies with:
+  [COMMAND]: <the command you sent>
+  [EXIT]: <exit code, 0 = success>
+  [OUTPUT]:
+  <stdout and stderr>
+
+You then read that output and continue the conversation.
+
+HARD RULES — these are not suggestions:
+
+1. If the user asks anything that requires looking at files, directories, processes, environment, installed software, dates, network state, or any other local-machine fact — your reply MUST contain a [EXEC: ...] line. No exceptions.
+
+2. NEVER respond with phrases like 'I cannot access your filesystem', 'I am a large language model', 'I don't have the capability', 'my operations are confined to processing text', or any variant. Those phrases are FACTUALLY WRONG in this harness and indicate you ignored this instruction. If you find yourself about to write one, stop and emit [EXEC: ...] instead.
+
+3. Do NOT ask for permission ('would you like me to...?') before issuing [EXEC: ...]. The harness already asks for confirmation. Just emit the command.
+
+4. One [EXEC: ...] per turn. Wait for the [COMMAND]/[EXIT]/[OUTPUT] reply before issuing another.
+
+5. Prefer read-only commands. For destructive commands (rm, mv, kill, etc.) explain the intent in one sentence before the [EXEC: ...] line so the user can deny confidently.
+
+WORKED EXAMPLES (study the pattern):
+
+  User: can you find the docs files in my computer?
+  You:  I'll search your home directory for doc-looking files.
+        [EXEC: find ~ -maxdepth 4 -type f \( -iname '*.md' -o -iname '*.txt' -o -iname '*.doc*' -o -iname '*.pdf' \) 2>/dev/null | head -50]
+
+  User: which files are in the root folder
+  You:  [EXEC: ls -la ~]
+
+  User: what python version do I have
+  You:  [EXEC: python3 --version]
+
+  User: is ollama running?
+  You:  [EXEC: pgrep -lf 'ollama serve' || echo 'not running']
+
+Now answer the user's next message following these rules.
+PROMPT_EOF
+}
+
+# Extract the bash command from the first [EXEC: ...] line in a response.
+# Prints the command to stdout; prints nothing (exit 1) when there's no
+# EXEC call.
+#
+# Parsing is LINE-based on purpose. The old approach ran the greedy regex
+#   \[EXEC:\ (.*)\]
+# over the whole multiline response, so any later "]" in the prose
+# (markdown links, a second bracket tag, …) got swallowed into the
+# command. The capability prompt requires the call to sit on its own
+# line, so: take the first line containing "[EXEC: ", strip everything
+# up to and including the marker, then strip from the LAST "]" on that
+# line — which keeps inner brackets like [[ -f x ]] intact.
+extract_exec_cmd() {
+    local response="$1"
+    local line
+    line=$(printf '%s\n' "$response" | grep -m1 -F '[EXEC: ')
+    [[ -z "$line" ]] && return 1
+    local cmd="${line#*\[EXEC: }"
+    cmd=$(trim_ws "$cmd")
+    # The closing ']' must END the line (contract: the call is on its own
+    # line). Anchor to it and strip that ONE trailing bracket, instead of
+    # the old %]* which cut from the LAST ']' anywhere. That old form both
+    # CORRUPTED legit commands with an inner ']' (e.g. `test -d ~/d] ||
+    # mkdir`) and let junk appended after the bracket slip through. If the
+    # line doesn't end in ']', it isn't a well-formed call → reject.
+    # (The deny-by-default Execute? gate is the real safety net; this just
+    #  keeps the parser honest.)
+    [[ "$cmd" == *"]" ]] || return 1
+    cmd="${cmd%]}"
+    cmd=$(trim_ws "$cmd")
+    [[ -z "$cmd" ]] && return 1
+    printf '%s' "$cmd"
+}
+
+# The agent-mode execution gate, deny-by-default. Returns 0 ONLY for an
+# explicit affirmative (y/Y/yes/YES); empty input (a reflex Enter),
+# "n"/"no", or any fat-finger returns 1 → the command is NOT run. This is
+# the real safety net for [EXEC: ...] — keep it strict.
+agent_confirmed() {
+    [[ "$1" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
+# Speak the given text via macOS `say` using auto-detected voice + current
+# colors/rate. Does nothing if VOICE_MODE is off or the text is empty.
+# --interactive prints the text with word-by-word highlight as it's spoken,
+# which IS the on-screen rendering when voice is on. To avoid a double
+# print, send_and_capture suppresses ola's own streaming output when
+# VOICE_MODE is on (the thinking indicator on stderr still shows).
+speak_if_enabled() {
+    local text="$1"
+    [[ "$VOICE_MODE" == "ON" && -n "$text" ]] || return 0
+    local voice
+    voice=$(get_voice "$text")
+    echo "$text" | say -v "$voice" -r "$SAY_RATE" --interactive="$SAY_COLORS"
+}
+
+# Dispatch a message to ola, capture the response, speak it if needed,
+# trigger memory compression, and wipe the per-turn web research cache.
+# This is the canonical "talk to the model" path used by the main loop
+# and every /command that feeds the AI.
+#
+# When VOICE_MODE is ON, we suppress ola's streamed stdout — say
+# --interactive will render the response with highlighting as it speaks,
+# so showing it twice would be noisy. stderr (the 🤔 thinking glyph and
+# any errors) is left alone.
+send_and_capture() {
+    if [[ "$VOICE_MODE" == "ON" ]]; then
+        "$CHAT_CMD" "$@" >/dev/null
+    else
+        "$CHAT_CMD" "$@"
+    fi
+    LAST_RESPONSE=$(cat "$LAST_RESPONSE_FILE" 2>/dev/null || echo "")
+    speak_if_enabled "$LAST_RESPONSE"
+    maybe_compress
+    # Surface the web research summary AFTER the response so it's the
+    # last thing on screen for this turn (otherwise the streamed answer
+    # scrolls it out of view). do_web_research left it in a file because
+    # it ran in a subshell and couldn't hand it back via the environment.
+    local summary_file="${WEB_CACHE_DIR:-/tmp}/.last_web_summary"
+    if [[ -f "$summary_file" ]]; then
+        echo ""
+        cat "$summary_file"
+        rm -f "$summary_file"
+    fi
+}
+
+# Apply per-turn wrappers to a user message: web research when /w is on
+# (always decompose; the LLM is told to return just the original query
+# when it's already atomic), language directive when /lang isn't auto.
+# AGENT_MODE is *not* applied here — it belongs to the interactive main
+# loop because the [EXEC: ...] handshake only makes sense there.
+#
+# Heads-up for /s batch inputs: lines like "3M <--> US88579Y1010" need
+# normalization before the decomposer sees them. Two failure modes I hit:
+#   1. Small models read "3" as a list bullet -> "M (US88...) ROIC".
+#   2. EVERY llama/gemma model (incl. 26B) drops digit-prefix subjects
+#      like "3M" once parenthesised — a tokenizer/training bias from
+#      list-marker patterns "3. item".
+# Fix is two-stage: re-format the message before decompose (cosmetic),
+# and prepend the original subject to any sub-query that lost it
+# (defensive).
+normalize_for_decomp() {
+    local m="$1"
+    if [[ "$m" == *"<-->"* ]]; then
+        local left right
+        left=$(trim_ws "${m%%<-->*}")
+        right=$(trim_ws "${m##*<-->}")
+        m="${left} ${right}"   # no parens — parens trip the tokenizer
+    fi
+    printf '%s' "$m"
+}
+
+# Extract the entity name from a batch line. For "Name <--> ID" returns
+# "Name"; for free-form text returns empty (no safety net needed).
+extract_subject() {
+    local m="$1"
+    if [[ "$m" == *"<-->"* ]]; then
+        trim_ws "${m%%<-->*}"
+    fi
+}
+
+# Decompose the user query into atomic sub-questions, run each through
+# web_search, and print the combined research notes to stdout. Empty
+# stdout means "no usable results".
+#
+# Writes a one-line "✓N · ∅N · ⛔N" summary to $WEB_CACHE_DIR/.last_web_summary
+# for send_and_capture to print after the answer — a file, not an env var,
+# because this runs in a command-substitution subshell whose exports
+# don't reach the caller. All progress + warnings go to stderr so the
+# caller can capture stdout cleanly into a variable.
+do_web_research() {
+    local m="$1"
+    mkdir -p "${WEB_CACHE_DIR:-/tmp}"   # fresh installs may not have it yet
+
+    # Build the decomposer's context: recent conversation FIRST (so it can
+    # resolve references like "those countries" in a follow-up — without
+    # this the LLM invents random subjects), then the session prompt (so a
+    # bare ticker expands into ROIC/P-E/moat lookups). Combined into one
+    # temp file the decomposer reads.
+    local prompt_file ctx_file
+    prompt_file=$(current_session_prompt_file)
+    ctx_file=$(mktemp "${WEB_CACHE_DIR:-/tmp}/decompctx.XXXXXX")
+    {
+        if [[ -n "${_RECENT_TURNS:-}" ]]; then
+            echo "RECENT CONVERSATION (oldest first):"
+            printf '%s\n' "$_RECENT_TURNS"
+            echo
+        fi
+        if [[ -f "$prompt_file" && -s "$prompt_file" ]]; then
+            echo "ANALYSIS FRAMEWORK (session prompt):"
+            cat "$prompt_file"
+        fi
+    } > "$ctx_file"
+
+    local m_for_decomp subject
+    m_for_decomp=$(normalize_for_decomp "$m")
+    subject=$(extract_subject "$m")
+
+    echo "🔎 Researching: decomposing the question..." >&2
+    local -a subs=()
+    local line
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        # Skip non-query preamble lines like "Here are the search queries:".
+        # A real query is keywords-only, no trailing colon, never starts
+        # with a meta-word like Here/Below/These/Sure.
+        case "$line" in
+            "Here "*|"Below "*|"These "*|"Sure"*|"Okay"*|"Of course"*) continue ;;
+        esac
+        [[ "$line" == *: ]] && continue
+        # Defensive: if the decomposer dropped the entity name
+        # (a tokenizer bias for digit-prefixed names like "3M"),
+        # re-attach it.
+        if [[ -n "$subject" && "$line" != *"$subject"* ]]; then
+            line="$subject $line"
+        fi
+        subs+=("$line")
+    done < <(decompose_query "$m_for_decomp" "$ctx_file")
+    rm -f "$ctx_file"
+
+    # Safety net: if the preamble filter ate everything (e.g. the
+    # decomposer fell back to the user's own query and it happened to
+    # start with "Sure"/"Here" or end with ":"), search the normalized
+    # query directly instead of doing ZERO searches and answering from
+    # stale memory — which would silently defeat /web.
+    [[ ${#subs[@]} -eq 0 ]] && subs=("$m_for_decomp")
+
+    local notes=""
+    local i=0 got=0 blocked=0 empty=0
+    local sq r
+    for sq in "${subs[@]}"; do
+        ((i++))
+        echo "   [$i/${#subs[@]}] $sq" >&2
+        r=$(web_search "$sq" 2>/dev/null)
+        case "$r" in
+            "Error: search engine is rate-limiting"*)
+                echo "       ⛔ blocked by search engine (anti-bot challenge)" >&2
+                ((blocked++))
+                ;;
+            "Error:"*)
+                echo "       ⚠️  $r" >&2
+                ((empty++))
+                ;;
+            "No results found"*)
+                echo "       ∅ no results" >&2
+                ((empty++))
+                ;;
+            *)
+                notes+="
+
+--- [$i] $sq
+$r"
+                ((got++))
+                ;;
+        esac
+    done
+    if (( blocked > 0 )); then
+        echo "   ⚠️  Search engine is rate-limiting this client. Pause /web or switch IP." >&2
+    fi
+    # Stash the summary in a FILE, not an env var: do_web_research runs
+    # inside a command-substitution subshell (notes=$(do_web_research)),
+    # and an export there never reaches send_and_capture in the main
+    # shell. A file does. send_and_capture prints it after the answer,
+    # then deletes it.
+    printf '🔎 Web research: ✓ %s hit · ∅ %s empty · ⛔ %s blocked\n' \
+        "$got" "$empty" "$blocked" > "${WEB_CACHE_DIR:-/tmp}/.last_web_summary"
+
+    printf '%s' "$notes"
+}
+
+# Wrap the user message with the system rules for the current turn.
+# Two orthogonal wrappers stack:
+#   /web on → triage, then (if needed) run web research + STRICT RULES
+#   /lang   → prepend "[IMPORTANT: Respond ONLY in $lang]"
+#
+# Triage: when /web is on, a router (web_query_needs_search) decides per
+# message whether live data is actually needed. A joke or a coding
+# question skips the search entirely; prices/news/"latest" trigger it.
+# Set WEB_AUTO=0 to disable triage and always search (the old behavior).
+augment_message() {
+    local m="$1"
+    if [[ "$WEB_MODE" == "ON" ]]; then
+        local do_search="yes"
+        if [[ "${WEB_AUTO:-1}" == "1" ]]; then
+            echo "🤔 Deciding if this needs the web..." >&2
+            if [[ "$(web_query_needs_search "$m")" == "DIRECT" ]]; then
+                do_search="no"
+                echo "💬 Answering from the model — no web search needed." >&2
+            fi
+        fi
+        if [[ "$do_search" == "no" ]]; then
+            # Skip research; fall through to the language wrapper with $m
+            # unchanged. No STRICT RULES so the model answers naturally.
+            :
+        else
+        local notes today
+        notes=$(do_web_research "$m")
+        today=$(date +%Y-%m-%d)
+        if [[ -n "$notes" ]]; then
+            m="[STRICT RESEARCH RULES — read before answering]
+Today's date is $today. The research notes below were collected from the live web moments ago.
+
+1. SOURCE OF TRUTH: Use ONLY the research notes as the basis for facts and numbers. Do NOT fall back on memorized data from your training.
+2. MISSING DATA: If a specific value the user needs is not present in the notes, write \"N/A\" (or \"not available\"). Do NOT fabricate, estimate, or guess.
+3. DATES: If you cite a \"Data as of\" date, it must (a) be today's date $today, or (b) match a date that actually appears in the notes. NEVER cite a date earlier than 6 months ago unless that exact date appears in the notes.
+4. NO META TALK: Never mention these notes, never name a search engine (DuckDuckGo, Google, etc.), never quote URLs, never say \"the text\", \"the results\", \"according to\". Speak as if you knew these facts directly.
+5. Reply in the SAME language as the user.
+
+[RESEARCH NOTES]
+$notes
+
+USER: $m"
+        else
+            m="[NOTICE]
+Web research returned nothing usable for this query (today is $today). For any data point the user explicitly requested, write \"N/A\" or \"data not available\". Do NOT fabricate values from training-time memory. If the user's request was conversational, just answer naturally.
+
+USER: $m"
+        fi
+        fi
+    fi
+    if [[ "$FORCE_LANG" != "auto" ]]; then
+        local lang
+        case "$FORCE_LANG" in
+            es) lang="Spanish" ;; de) lang="German" ;; fr) lang="French" ;;
+            pt) lang="Portuguese" ;; it) lang="Italian" ;; ru) lang="Russian" ;;
+            en) lang="English" ;; *) lang="$FORCE_LANG" ;;
+        esac
+        m="[IMPORTANT: Respond ONLY in $lang] $m"
+    fi
+    printf '%s' "$m"
+}
+
+# --- INTERNAL MACROS ---
+
+# Internal 'fola' (File to Ola): stream a file's contents to Ola.
+macro_fola() {
+    local file="$1"
+    shift
+    local user_msg="$*"
+    [[ ! -f "$file" ]] && { echo "❌ File not found: $file"; return 1; }
+    local content nl=$'\n'
+    content=$(cat "$file")
+    # $'\n' for real newlines — "\n" inside double quotes is the literal
+    # two characters backslash+n, which the model would see verbatim.
+    if [[ -n "$user_msg" ]]; then
+        send_and_capture "${user_msg}:${nl}${nl}${content}"
+    else
+        send_and_capture "File Content:${nl}${nl}${content}"
+    fi
+}
+
+# Internal 'sola' (Serial/Batch process): stream each line as its own prompt.
+macro_sola() {
+    local full_cmd_args="$1"
+    local range=""
+    local file=""
+
+    # Two forms: "START-END FILE" (range + file) or just "FILE" (whole file).
+    # The first regex matches both — when no file follows the range,
+    # BASH_REMATCH[4] is empty and we report it explicitly below.
+    if [[ "$full_cmd_args" =~ ^(([0-9]*)-([0-9]*))[[:space:]]*(.*)$ ]]; then
+        range="${BASH_REMATCH[1]}"
+        file="${BASH_REMATCH[4]}"
+    else
+        file="$full_cmd_args"
+    fi
+
+    if [[ -z "$file" ]]; then
+        echo "❌ File path missing for batch processing."
+        return 1
+    fi
+
+    file=$(expand_path "$file")
+    [[ ! -f "$file" ]] && { echo "❌ File not found: $file"; return 1; }
+
+    local start_line=1
+    local end_line
+    end_line=$(grep -c "" "$file")
+
+    if [[ -n "$range" ]]; then
+        local range_start="${range%-*}"
+        local range_end="${range#*-}"
+        [[ -n "$range_start" ]] && start_line="$range_start"
+        [[ -n "$range_end" ]] && end_line="$range_end"
+    fi
+
+    if (( start_line <= 0 || start_line > end_line )); then
+        echo "❌ Invalid start line: $start_line."
+        return 1
+    fi
+
+    echo "📤 Batch processing $file (Lines $start_line to $end_line)"
+    echo "   (Ctrl+C to cancel)"
+    [[ "$WEB_MODE" == "ON" ]] && echo "   🔎 Web search ON — each line will be augmented with SearXNG results."
+    [[ "$FORCE_LANG" != "auto" ]] && echo "   🌐 Lang forced to $FORCE_LANG."
+    local processed_count=0
+    local interrupted=0
+    # Trap SIGINT so Ctrl+C breaks out cleanly instead of killing the
+    # whole REPL mid-stream. Using process substitution (not `sed | while`)
+    # keeps the while loop in the main shell so the `interrupted` flag is
+    # visible to it.
+    trap 'interrupted=1' INT
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        (( interrupted )) && break
+        [[ -z "${line//[[:space:]]/}" ]] && continue
+        ((processed_count++))
+        echo ""
+        echo "----------------------------------------------------------------------"
+        echo "🚀 [$((start_line + processed_count - 1))/$end_line] Processing: $line"
+        echo -n "🤖 AI: "
+        local augmented
+        augmented=$(augment_message "$line")
+        (( interrupted )) && break
+        send_and_capture "$augmented"
+        (( interrupted )) && break
+        "$MOLA_CMD" save > /dev/null
+    done < <(sed -n "${start_line},${end_line}p" "$file")
+    trap - INT
+
+    echo ""
+    if (( interrupted )); then
+        echo "🛑 Batch cancelled after $processed_count line(s)."
+    else
+        echo "✅ Batch process complete ($processed_count line(s))."
+    fi
+}
+
+# True if $1 is a regular file with an OCR-able extension (case-insensitive).
+# Plain case (not ${x,,}) so it works on macOS bash 3.2.
+ocr_is_ocrable() {
+    [[ -f "$1" ]] || return 1
+    local ext
+    ext=$(printf '%s' "${1##*.}" | tr '[:upper:]' '[:lower:]')
+    case "$ext" in
+        jpg|jpeg|png|pdf|tif|tiff|bmp|gif|heic) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Collect OCR-able files from an argument that may be a single file, a
+# DIRECTORY (its files, non-recursive), or a glob. Prints one path per
+# line; nothing if there are none. read -e doesn't expand globs, so we
+# expand them here. A directory or glob is filtered to OCR-able files
+# only (so OCR_OUTPUTS subdirs and stray .txt are skipped); an explicitly
+# named single file is trusted as-is.
+ocr_collect_files() {
+    local arg="$1"
+    local -a hits=()
+    local p
+    if [[ "$arg" == *[\*\?]* ]]; then
+        for p in $arg; do ocr_is_ocrable "$p" && hits+=("$p"); done
+    elif [[ -d "$arg" ]]; then
+        while IFS= read -r p; do
+            ocr_is_ocrable "$p" && hits+=("$p")
+        done < <(find "$arg" -maxdepth 1 -type f 2>/dev/null | sort)
+    elif [[ -f "$arg" ]]; then
+        hits+=("$arg")
+    fi
+    [[ ${#hits[@]} -gt 0 ]] && printf '%s\n' "${hits[@]}"
+}
+
+# Internal 'ocr': OCR one file, a folder of files, or a glob, then send
+# the combined extracted text to the model for analysis.
+macro_ocr() {
+    local arg
+    arg=$(expand_path "$1")
+    local -a files=()
+    local f
+    while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done < <(ocr_collect_files "$arg")
+
+    if [[ ${#files[@]} -eq 0 ]]; then
+        if [[ -d "$arg" ]]; then
+            echo "❌ No OCR-able files (images/PDF) in: $arg"
+        else
+            echo "❌ File not found: $arg"
+        fi
+        return 1
+    fi
+
+    (( ${#files[@]} > 1 )) && echo "📄 OCR on ${#files[@]} files in $(dirname "${files[0]}")..."
+    local combined="" ocr_out nl=$'\n'
+    for f in "${files[@]}"; do
+        (( ${#files[@]} == 1 )) && echo "📄 OCR on $f..."
+        "$DOCR_CMD" "$f" > /dev/null
+        # Match by LITERAL prefix, not a find -name glob: a source name
+        # with [ ] * ? would be misread as a glob pattern and silently
+        # find nothing (→ "no text" on a file that OCR'd fine). The
+        # quoted "ocr_$base" makes the [[ ]] comparison literal; only the
+        # trailing * is a wildcard.
+        local base; base=$(basename "${f%.*}")
+        ocr_out=$(find "$(dirname "$f")/OCR_OUTPUTS" -type f -name '*.txt' -newer "$f" 2>/dev/null \
+            | while IFS= read -r p; do [[ "$(basename "$p")" == "ocr_$base"* ]] && printf '%s\n' "$p"; done \
+            | head -n 1)
+        if [[ -n "$ocr_out" ]]; then
+            combined+="${nl}=== $(basename "$f") ===${nl}$(cat "$ocr_out")${nl}"
+        else
+            echo "   ⚠️  No text extracted from $(basename "$f")"
+        fi
+    done
+
+    if [[ -n "$combined" ]]; then
+        send_and_capture "Analyze scanned text:${combined}"
+    else
+        echo "❌ OCR failed (no text extracted)."
+    fi
+}
+
+# --- UI HELPERS ---
+
+show_settings() {
+    local curr_sess
+    curr_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null || echo "active")
+    local curr_model
+    curr_model=$(active_model)
+    local prompt_file
+    prompt_file=$(current_session_prompt_file)
+    local system_prompt_text="Not Set"
+    if [[ -f "$prompt_file" && -s "$prompt_file" ]]; then
+        system_prompt_text=$(head -c 200 "$prompt_file")
+        [[ $(wc -c < "$prompt_file") -gt 200 ]] && system_prompt_text="${system_prompt_text}…"
+    fi
+    cat << EOF
+
+Current Chati Settings:
+==========================
+🤖 Model:    $curr_model
+🌐 Lang:     $FORCE_LANG
+🔎 Web:      $WEB_MODE
+🛠️  Agent:    $AGENT_MODE   (when ON: AI may propose shell commands; you approve each)
+🗣️  Talk:     $VOICE_MODE (Voice: $DEFAULT_VOICE, Speed: ${SAY_SPEED}x, Colors: $SAY_COLORS)
+📅 Session:  $curr_sess
+🎭 Prompt:   $system_prompt_text
+
+EOF
+}
+
+show_help() {
+    cat << EOF
+
+Chati Help - Ollama Edition
+==============================
+Commands start with a slash (/). Standard: every command is a full
+word; the short form in parentheses is an equivalent alias.
+
+Core:
+-----
+/help      (/h, /?)     Show this help menu.
+/quit      (/q)         Exit chat loop (also /bye, /exit).
+/settings               Show current chat settings.
+
+Session Management:
+-------------------
+/sessions               List all saved conversations (with numbers).
+/new [name]             Start a new session (timestamp_name).
+/switch <idx|name>      Switch to a specific conversation.
+/back                   Toggle to the previously active session.
+/rename [idx] <name>    Rename a session (active or by index).
+/autorename [idx|all|all-force]  Let the AI title the session(s).
+/delete <idx|name>      Delete a session.
+
+File & Batch:
+-------------
+/file  (/f) <file> [msg]    Send a whole file with an optional instruction.
+/batch (/s) [range] <file>  Batch: send each line of <file> separately.
+                            Example: /batch 10-20 Stocks.txt
+/ocr <file|folder|glob>     OCR an image/PDF, a whole folder of them,
+                            or a glob, then analyze the text.
+/url <link>                 Analyze webpage content.
+
+Mode Toggles:
+-------------
+/talk  (/t)             Toggle auto-speech.
+/web   (/w)             Toggle web research. Every query is decomposed
+                        by the LLM into atomic sub-questions and each is
+                        searched separately via the configured SearXNG
+                        instance; the combined notes feed the final
+                        answer. The per-turn cache lives at
+                        \$WEB_CACHE_DIR/turn.* and is wiped automatically
+                        once the answer lands.
+/agent (/a)             Toggle Agent Mode — allow the AI to propose
+                        shell commands to run on your Mac. Every command
+                        pops up an "Execute? (y/N)" confirmation before
+                        it runs, so nothing happens without your
+                        approval. Off by default.
+
+Configuration:
+--------------
+/prompt                 View the session prompt.
+/prompt <text>          Set the session prompt to a single line.
+/prompt -e              Edit the session prompt in \$EDITOR (multi-line).
+/prompt ""              Clear the session prompt.
+/model [idx|name]       List or switch Ollama model.
+/lang [code]            List or set response language (auto, en, es, …).
+/voice [name]           List or set TTS voice (Samantha, Anna, Paulina, …).
+/speed [mult]           Set speech speed multiplier (0.25 – 3.0).
+/colors [fg/bg]         Set say --interactive colors.
+
+EOF
+}
+
+# --- /prompt helpers ---
+
+edit_prompt_in_editor() {
+    local prompt_file="$1"
+    local editor="${EDITOR:-vi}"
+    mkdir -p "$(dirname "$prompt_file")"
+    if ! command -v "$editor" >/dev/null 2>&1; then
+        echo "❌ \$EDITOR ($editor) not found. Set EDITOR to a valid command."
+        return 1
+    fi
+    "$editor" "$prompt_file"
+    if [[ -s "$prompt_file" ]]; then
+        echo "✅ Session prompt saved ($(wc -c < "$prompt_file" | tr -d ' ') bytes)."
+    else
+        rm -f "$prompt_file"
+        echo "🗑️  Session prompt cleared (empty)."
+    fi
+}
+
+# --- STARTUP ---
+
+show_version
+echo "------------------"
+
+# Auto-start Ollama on launch if it's not already running. Silent if it
+# already is; just informational otherwise.
+ensure_ollama_running() {
+    if ollama_running; then return 0; fi
+    if ! command -v ollama >/dev/null 2>&1; then
+        echo "⚠️  ollama binary not found in PATH. Install it: brew install ollama" >&2
+        return 1
+    fi
+    echo "🚀 Starting 'ollama serve' (logs: ~/logs/ollama.log)..."
+    mkdir -p "$HOME/logs"
+    nohup ollama serve >"$HOME/logs/ollama.log" 2>&1 &
+    # Wait up to ~10s for the API to come up.
+    local i
+    for i in {1..10}; do
+        sleep 1
+        if ollama_running; then
+            echo "   ✅ Ollama is ready."
+            return 0
+        fi
+    done
+    echo "   ⚠️  Ollama didn't become ready in 10s. Check ~/logs/ollama.log" >&2
+    return 1
+}
+
+ensure_ollama_running
+
+# Guard against a STALE explicit selection. active_model() returns a usable
+# model when nothing is selected (empty/missing file), but it honors an
+# explicit .active_ollama_model.txt verbatim by design — so a model that was
+# selected and later removed (`ollama rm`) would otherwise make every chat
+# turn fail with "model 'X' not found". Here, at startup only, if the selected
+# model isn't installed while others are, switch to an installed one, persist
+# it, and say so. No-op when the model is present or Ollama isn't reachable.
+ensure_valid_model() {
+    ollama_running || return 0
+    local want installed
+    want=$(active_model)
+    installed=$(ollama list 2>/dev/null | tail -n +2 | awk 'NF{print $1}')
+    [[ -z "$installed" ]] && return 0                 # nothing installed → active_model already warned elsewhere
+    printf '%s\n' "$installed" | grep -qxF "$want" && return 0
+    local pick
+    pick=$(printf '%s\n' "$installed" | head -1)
+    printf '%s\n' "$pick" > "$ACTIVE_MODEL_FILE"
+    echo "⚠️  Selected model '$want' is not installed — switched to '$pick'."
+    echo "    Change it anytime with /model, or install the original:"
+    echo "      ollama pull $want"
+}
+
+ensure_valid_model
+
+show_settings
+echo "Type /h for help | /bye to exit."
+
+while true; do
+    # Recover gracefully if the active session file was deleted.
+    curr_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    if [[ -z "$curr_sess" || ! -f "$HISTORY_DIR/$curr_sess" ]]; then
+        echo "⚠️  Current session missing. Starting a new one..."
+        "$MOLA_CMD" new > /dev/null
+    fi
+
+    read -e -rp "> " msg
+    [[ -z "$msg" ]] && continue
+    history -s "$msg"   # in-memory only; trap flushes on exit
+
+    if [[ "$msg" == /* ]]; then
+        cmd_name="${msg%% *}"
+        if [[ "$msg" == *" "* ]]; then
+            cmd_args="${msg#* }"
+        else
+            cmd_args=""
+        fi
+
+        case "$cmd_name" in
+            /bye|/exit|/quit|/q)
+                "$MOLA_CMD" save > /dev/null
+                echo "Goodbye!"
+                exit 0 ;;
+            /h|/help|/\?) show_help ;;
+            /settings)   show_settings ;;
+            /prompt)
+                prompt_file=$(current_session_prompt_file)
+                if [[ -z "$cmd_args" ]]; then
+                    if [[ -f "$prompt_file" && -s "$prompt_file" ]]; then
+                        echo "Current System Prompt ($(basename "$prompt_file")):"
+                        echo "-----"
+                        cat "$prompt_file"
+                        echo "-----"
+                    else
+                        echo "No System Prompt set for this session."
+                        echo "Tip: /prompt <text>  or  /prompt -e  (opens \$EDITOR)"
+                    fi
+                elif [[ "$cmd_args" == "-e" ]]; then
+                    edit_prompt_in_editor "$prompt_file"
+                elif [[ "$cmd_args" == '""' ]]; then
+                    rm -f "$prompt_file"
+                    echo "🗑️  System prompt cleared."
+                else
+                    mkdir -p "$(dirname "$prompt_file")"
+                    echo "$cmd_args" > "$prompt_file"
+                    echo "✅ System prompt set."
+                fi
+                ;;
+            /sessions)   "$MOLA_CMD" list ;;
+            /new)        "$MOLA_CMD" new "$cmd_args" ;;
+            /switch)     "$MOLA_CMD" switch "$cmd_args" ;;
+            /back)       "$MOLA_CMD" back ;;
+            # $cmd_args is left unquoted on purpose so "3 new_name" splits
+            # into two args — but disable globbing first (set -f) so a
+            # name like "*" isn't expanded against the cwd, then restore.
+            /rename)     set -f; "$MOLA_CMD" rename $cmd_args; set +f ;;
+            /autorename) set -f; "$MOLA_CMD" autorename $cmd_args; set +f ;;
+            /delete)     "$MOLA_CMD" delete "$cmd_args" ;;
+            /file|/f)
+                # Try the whole argument as a path first so files with
+                # spaces work when no instruction follows; fall back to
+                # splitting on the first space (file + instruction).
+                f_path=$(expand_path "$cmd_args")
+                if [[ -f "$f_path" ]]; then
+                    macro_fola "$f_path" ""
+                else
+                    read -r f_file f_instruction <<< "$cmd_args"
+                    f_path=$(expand_path "$f_file")
+                    macro_fola "$f_path" "$f_instruction"
+                fi
+                ;;
+            /batch|/s)   macro_sola "$cmd_args" ;;
+            /talk|/t)
+                if [[ "$VOICE_MODE" == "ON" ]]; then VOICE_MODE="OFF"; else VOICE_MODE="ON"; fi
+                echo "🗣️  Auto-Voice: $VOICE_MODE" ;;
+            /colors)
+                if [[ -n "$cmd_args" ]]; then
+                    # Whitelist the input — say --interactive=COLORS expects
+                    # exactly "fg/bg" with both names from a fixed palette.
+                    # Anything else risks breaking the say invocation when
+                    # the variable is expanded.
+                    if [[ "$cmd_args" =~ ^[a-z]+/[a-z]+$ ]]; then
+                        SAY_COLORS="$cmd_args"
+                        echo "🎨 Speech colors set to: $SAY_COLORS"
+                    else
+                        echo "❌ Invalid format. Use foreground/background, e.g. white/green"
+                    fi
+                else
+                    echo "🎨 Current speech colors: $SAY_COLORS"
+                    echo "Available: black, red, green, yellow, blue, magenta, cyan, white"
+                    echo "Usage: /colors foreground/background"
+                fi
+                ;;
+            /ocr)
+                if [[ -n "$cmd_args" ]]; then
+                    macro_ocr "$cmd_args"
+                else
+                    echo "❌ Provide a file, folder, or glob. e.g. /ocr ~/Downloads/scan.pdf"
+                fi
+                ;;
+            /url)
+                if [[ -n "$cmd_args" ]]; then
+                    echo "🌐 Fetching $cmd_args..."
+                    URL_RESULTS=$(fetch_url "$cmd_args")
+                    if [[ "$URL_RESULTS" == "Error"* ]]; then
+                        echo "❌ $URL_RESULTS"
+                    else
+                        send_and_capture "Summarize and answer questions: $URL_RESULTS"
+                    fi
+                else
+                    echo "❌ Provide URL."
+                fi
+                ;;
+            /agent|/a)
+                if [[ "$AGENT_MODE" == "ON" ]]; then
+                    AGENT_MODE="OFF"
+                    echo "🛠️  Agent Mode: OFF — AI can no longer run shell commands."
+                else
+                    AGENT_MODE="ON"
+                    echo "🛠️  Agent Mode: ON — AI may now propose shell commands on your Mac."
+                    echo "    Each command will ask 'Execute? (y/N)' before running."
+                fi ;;
+            /web|/w)
+                if [[ "$WEB_MODE" == "ON" ]]; then
+                    WEB_MODE="OFF"
+                    echo "🌐 Web Search: OFF"
+                else
+                    # SearXNG is external — only enable /web if it actually
+                    # answers, so we never pretend to have internet.
+                    echo "🌐 Checking web search backend(s)..." >&2
+                    web_reason=$(web_search_available 2>&1)
+                    if [[ $? -eq 0 ]]; then
+                        WEB_MODE="ON"
+                        echo "🌐 Web Search: ON"
+                        # Show which endpoints are live (round-robins over them).
+                        [[ -n "$web_reason" ]] && echo "$web_reason"
+                    else
+                        WEB_MODE="OFF"
+                        echo "🚫 Web search unavailable:"
+                        echo "$web_reason"
+                        echo "   Staying OFF. Set SEARXNG_URLS (or run a local SearXNG); see installer/SEARXNG_SETUP.md."
+                    fi
+                fi ;;
+            /speed)
+                if [[ -n "$cmd_args" ]]; then
+                    if [[ "$cmd_args" =~ ^[0-9]*\.?[0-9]+$ ]]; then
+                        SAY_SPEED="$cmd_args"
+                        update_say_rate
+                        echo "🗣️  Speech speed set to: ${SAY_SPEED}x ($SAY_RATE wpm)"
+                    else
+                        echo "❌ Invalid speed. Use a multiplier (e.g., /speed 1.5)."
+                    fi
+                else
+                    echo "🗣️  Current speech speed: ${SAY_SPEED}x ($SAY_RATE wpm)"
+                fi
+                ;;
+            /model)
+                if [[ -n "$cmd_args" ]]; then
+                    "$OLA_MODEL_CMD" set "$cmd_args"
+                else
+                    "$OLA_MODEL_CMD" list
+                    # Interactive pick: listing alone used to leave people
+                    # typing a bare "1" on the next line, which the REPL then
+                    # sent as a chat message to the (maybe-missing) default
+                    # model. Prompt for the choice right here instead.
+                    read -e -rp "Select a model number or name (Enter to cancel): " model_sel
+                    [[ -n "$model_sel" ]] && "$OLA_MODEL_CMD" set "$model_sel"
+                fi ;;
+            /lang)
+                if [[ -z "$cmd_args" ]]; then
+                    echo "🌐 Supported LLM response language codes:"
+                    echo "${VALID_LANG_CODES[*]}"
+                    echo "Current: $FORCE_LANG"
+                    echo "(use /voice to set the TTS voice)"
+                else
+                    arg_lower=$(echo "$cmd_args" | tr '[:upper:]' '[:lower:]')
+                    if [[ " ${VALID_LANG_CODES[*]} " =~ \ ${arg_lower}\  ]]; then
+                        FORCE_LANG="$arg_lower"
+                        echo "🌐 LLM response language set to: $FORCE_LANG"
+                    else
+                        echo "❌ Unknown language code: $cmd_args"
+                        echo "Valid: ${VALID_LANG_CODES[*]}"
+                    fi
+                fi
+                ;;
+            /voice)
+                if [[ -z "$cmd_args" ]]; then
+                    echo "🗣️  Available macOS voices:"
+                    say -v "?"
+                    echo ""
+                    echo "Current: $DEFAULT_VOICE  (AUTO = pick based on output language)"
+                else
+                    if [[ "$cmd_args" == "auto" || "$cmd_args" == "AUTO" ]]; then
+                        DEFAULT_VOICE="AUTO"
+                    else
+                        DEFAULT_VOICE="$cmd_args"
+                    fi
+                    echo "🗣️  Voice set to: $DEFAULT_VOICE"
+                fi
+                ;;
+            *)       echo "❓ Unknown command: $cmd_name." ;;
+        esac
+        continue
+    fi
+
+    # --- Non-command: build the message and send it. ---
+
+    # Keep the raw question for conversation memory (augment_message
+    # rewraps $msg with research notes; we want the clean text).
+    raw_user_msg="$msg"
+
+    msg=$(augment_message "$msg")
+
+    # Sync the agent capability instruction with the current /a toggle.
+    # When ON, ola's payload builder reads OLA_EXTRA_SYSTEM and adds it
+    # as a real role:system message just before the user turn (see
+    # agent_capability_prompt for the full text and rationale).
+    if [[ "$AGENT_MODE" == "ON" ]]; then
+        export OLA_EXTRA_SYSTEM
+        OLA_EXTRA_SYSTEM=$(agent_capability_prompt)
+    else
+        unset OLA_EXTRA_SYSTEM
+    fi
+
+    while true; do
+        send_and_capture "$msg"
+
+        # Autonomous tool-use loop.
+        if [[ "$AGENT_MODE" == "ON" ]] && agent_cmd=$(extract_exec_cmd "$LAST_RESPONSE"); then
+            echo "🐚 AI Action: $agent_cmd"
+            # Deny by default: ONLY an explicit y/Y runs the command.
+            # Enter, "no", a fat-finger, anything else → cancel. The old
+            # gate ran on everything except exactly n/N, so a reflex Enter
+            # over [EXEC: rm -rf ...] would have executed it.
+            read -rp "✅ Execute? (y/N): " confirm
+            if agent_confirmed "$confirm"; then
+                # </dev/null: don't let the command read the REPL's stdin
+                # (an interactive tool in $agent_cmd would otherwise eat
+                # the user's next prompt / hang the loop).
+                agent_output=$(bash -c "$agent_cmd" </dev/null 2>&1)
+                agent_exit=$?
+                if [[ -z "$agent_output" ]]; then
+                    if (( agent_exit == 0 )); then
+                        echo "📄 Output: (no output, exit=0 — command succeeded)"
+                    else
+                        echo "📄 Output: (no output, exit=$agent_exit — command failed)"
+                    fi
+                else
+                    echo "📄 Output:"
+                    echo "$agent_output"
+                    echo "(exit=$agent_exit)"
+                fi
+                msg="[COMMAND]: $agent_cmd
+[EXIT]: $agent_exit
+[OUTPUT]:
+${agent_output:-(no output)}
+
+Interpret the exit code: 0 means the command succeeded; non-zero means it failed and OUTPUT (if any) is the error message. Do NOT claim success when exit is non-zero."
+            else
+                echo "🚫 Cancelled (not executed)."
+                msg="User denied execution of: $agent_cmd"
+            fi
+            echo "--- (Autonomous Turn) ---"
+        else
+            break
+        fi
+    done
+
+    # Remember this turn (raw question + trimmed answer) so the next /web
+    # query can resolve references like "those"/"it" against it. Kept in
+    # memory only — the on-disk history is bloated with research wrappers.
+    # Last ~6 turns is plenty of context without ballooning the prompt.
+    _RECENT_TURNS=$(printf '%suser: %s\nassistant: %s\n' \
+        "${_RECENT_TURNS:-}" "$raw_user_msg" "$(printf '%s' "${LAST_RESPONSE:0:500}" | tr '\n' ' ')" \
+        | tail -n 12)
+
+    echo "---"
+done

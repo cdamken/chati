@@ -1,0 +1,167 @@
+Here's a list of languages and scripts from the Tesseract language codes, along with their corresponding languages or scripts:
+
+1. **afr** - Afrikaans
+2. **amh** - Amharic
+3. **ara** - Arabic
+4. **asm** - Assamese
+5. **aze** - Azerbaijani (Latin script)
+6. **aze_cyrl** - Azerbaijani (Cyrillic script)
+7. **bel** - Belarusian
+8. **ben** - Bengali
+9. **bod** - Tibetan
+10. **bos** - Bosnian
+11. **bre** - Breton
+12. **bul** - Bulgarian
+13. **cat** - Catalan
+14. **ceb** - Cebuano
+15. **ces** - Czech
+16. **chi_sim** - Simplified Chinese
+17. **chi_sim_vert** - Simplified Chinese (vertical text)
+18. **chi_tra** - Traditional Chinese
+19. **chi_tra_vert** - Traditional Chinese (vertical text)
+20. **chr** - Cherokee
+21. **cos** - Corsican
+22. **cym** - Welsh
+23. **dan** - Danish
+24. **deu** - German
+25. **div** - Dhivehi (Maldivian)
+26. **dzo** - Dzongkha
+27. **ell** - Greek
+28. **eng** - English
+29. **enm** - Middle English
+30. **epo** - Esperanto
+31. **equ** - (Not a standard language code; possibly an error or a placeholder)
+32. **est** - Estonian
+33. **eus** - Basque
+34. **fao** - Faroese
+35. **fas** - Persian (Farsi)
+36. **fil** - Filipino (Tagalog)
+37. **fin** - Finnish
+38. **fra** - French
+39. **frk** - Frankish (Old High German)
+40. **frm** - Middle French
+41. **fry** - Frisian
+42. **gla** - Scottish Gaelic
+43. **gle** - Irish
+44. **glg** - Galician
+45. **grc** - Ancient Greek
+46. **guj** - Gujarati
+47. **hat** - Haitian Creole
+48. **heb** - Hebrew
+49. **hin** - Hindi
+50. **hrv** - Croatian
+51. **hun** - Hungarian
+52. **hye** - Armenian
+53. **iku** - Inuktitut
+54. **ind** - Indonesian
+55. **isl** - Icelandic
+56. **ita** - Italian
+57. **ita_old** - Old Italian
+58. **jav** - Javanese
+59. **jpn** - Japanese
+60. **jpn_vert** - Japanese (vertical text)
+61. **kan** - Kannada
+62. **kat** - Georgian
+63. **kat_old** - Old Georgian
+64. **kaz** - Kazakh
+65. **khm** - Khmer
+66. **kir** - Kyrgyz
+67. **kmr** - Kurdish
+68. **kor** - Korean
+69. **kor_vert** - Korean (vertical text)
+70. **lao** - Lao
+71. **lat** - Latin
+72. **lav** - Latvian
+73. **lit** - Lithuanian
+74. **ltz** - Luxembourgish
+75. **mal** - Malayalam
+76. **mar** - Marathi
+77. **mkd** - Macedonian
+78. **mlt** - Maltese
+79. **mon** - Mongolian
+80. **mri** - Maori
+81. **msa** - Malay
+82. **mya** - Burmese
+83. **nep** - Nepali
+84. **nld** - Dutch
+85. **nor** - Norwegian
+86. **oci** - Occitan
+87. **ori** - Oriya (Odisha)
+88. **osd** - Orientation and Script Detection (not a language)
+89. **pan** - Punjabi
+90. **pol** - Polish
+91. **por** - Portuguese
+92. **pus** - Pashto
+93. **que** - Quechua
+94. **ron** - Romanian
+95. **rus** - Russian
+96. **san** - Sanskrit
+97. **script/Arabic** - Arabic script
+98. **script/Armenian** - Armenian script
+99. **script/Bengali** - Bengali script
+100. **script/Canadian_Aboriginal** - Canadian Aboriginal syllabics
+101. **script/Cherokee** - Cherokee syllabary
+102. **script/Cyrillic** - Cyrillic script
+103. **script/Devanagari** - Devanagari script
+104. **script/Ethiopic** - Ge'ez script (Ethiopic)
+105. **script/Fraktur** - Fraktur script (a style of blackletter)
+106. **script/Georgian** - Georgian script
+107. **script/Greek** - Greek alphabet
+108. **script/Gujarati** - Gujarati script
+109. **script/Gurmukhi** - Gurmukhi script
+110. **script/HanS** - Simplified Chinese characters
+111. **script/HanS_vert** - Simplified Chinese characters (vertical text)
+112. **script/HanT** - Traditional Chinese characters
+113. **script/HanT_vert** - Traditional Chinese characters (vertical text)
+114. **script/Hangul** - Hangul (Korean alphabet)
+115. **script/Hangul_vert** - Hangul (Korean alphabet, vertical text)
+116. **script/Hebrew** - Hebrew alphabet
+117. **script/Japanese** - Japanese scripts (Hiragana, Katakana, Kanji)
+118. **script/Japanese_vert** - Japanese scripts (vertical text)
+119. **script/Kannada** - Kannada script
+120. **script/Khmer** - Khmer script
+121. **script/Lao** - Lao script
+122. **script/Latin** - Latin alphabet
+123. **script/Malayalam** - Malayalam script
+124. **script/Myanmar** - Burmese script
+125. **script/Oriya** - Oriya script
+126. **script/Sinhala** - Sinhala script
+127. **script/Syriac** - Syriac alphabet
+128. **script/Tamil** - Tamil script
+129. **script/Telugu** - Telugu script
+130. **script/Thaana** - Thaana script (Maldivian)
+131. **script/Thai** - Thai script
+132. **script/Tibetan** - Tibetan script
+133. **script/Vietnamese** - Vietnamese script (Latin-based)
+134. **sin** - Sinhala
+135. **slk** - Slovak
+136. **slv** - Slovenian
+137. **snd** - Sindhi
+138. **snum** - (Not a standard language code; possibly an error or a placeholder)
+139. **spa** - Spanish
+140. **spa_old** - Old Spanish
+141. **sqi** - Albanian
+142. **srp** - Serbian
+143. **srp_latn** - Serbian (Latin script)
+144. **sun** - Sundanese
+145. **swa** - Swahili
+146. **swe** - Swedish
+147. **syr** - Syriac
+148. **tam** - Tamil
+149. **tat** - Tatar
+150. **tel** - Telugu
+151. **tgk** - Tajik
+152. **tha** - Thai
+153. **tir** - Tigrinya
+154. **ton** - Tongan
+155. **tur** - Turkish
+156. **uig** - Uyghur
+157. **ukr** - Ukrainian
+158. **urd** - Urdu
+159. **uzb** - Uzbek (Latin script)
+160. **uzb_cyrl** - Uzbek (Cyrillic script)
+161. **vie** - Vietnamese
+162. **yid** - Yiddish
+163. **yor** - Yoruba
+
+Note: Some codes might represent dialects or historical versions of languages, and some might be more specific than just a language (e.g., specifying a script or a particular form of a language).

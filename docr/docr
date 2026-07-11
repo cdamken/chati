@@ -1,0 +1,1373 @@
+#!/bin/bash
+#==============================================================================
+# GRAPH_PDF_OCR - Document Processing and OCR Chat Tool
+#==============================================================================
+# Author: Carlos Damken
+# Created: 2025
+# Last Modified: 2025-06-01
+#
+# Description:
+#   Advanced document processing tool that combines OCR (Optical Character
+#   Recognition) with chat capabilities. Processes PDFs, images, and graphs,
+#   extracts text content, and enables intelligent conversation about the
+#   document contents.
+#
+# Features:
+#   - PDF processing and conversion
+#   - Image OCR with Tesseract
+#   - Multi-language support
+#   - Graph and chart processing
+#   - Automatic language detection
+#   - Integration with chat backends
+#
+# Usage:
+#   ./graph_pdf_ocr file.pdf           # Process PDF
+#   ./graph_pdf_ocr image.png          # Process image
+#   ./graph_pdf_ocr -l eng file.jpg    # Specify language
+#   ./graph_pdf_ocr -h                 # Show help
+#
+# Dependencies:
+#   - tesseract (brew install tesseract tesseract-lang)
+#   - imagemagick (brew install imagemagick)
+#   - ghostscript (for PDF processing)
+#   - One of: ph, nls, or ola backends
+#
+# Related Files:
+#   - OCR_OUTPUTS/: Directory for processed files
+#   - All chat backends (ph, nls, ola)
+#==============================================================================
+
+# Scoring weights
+WORD_COUNT_WEIGHT=0.4
+CONFIDENCE_WEIGHT=0.3
+CHAR_DENSITY_WEIGHT=0.2
+ERROR_RATE_WEIGHT=0.1
+
+# Quality test profiles
+ULTRA_PROFILE="900 -sharpen 0x1.5 -contrast-stretch 0.1x0.05% -enhance"
+HIGH_PROFILE="600 -sharpen 0x1.0 -contrast-stretch 0.15x0.05%"
+CLEAN_PROFILE="600 -colorspace Gray -level 25%,75% -sharpen 0x1.0"
+SHADOW_PROFILE="450 -colorspace Gray -negate -lat 25x25+10% -negate -sharpen 0x1.0"
+BOOK_PROFILE="450 -colorspace Gray -negate -lat 20x20+10% -negate -sharpen 0x1.0"
+COLUMNS_PROFILE="450 -sharpen 0x1.0"
+BALANCED_PROFILE="450 -sharpen 0x0.8 -contrast-stretch 0.2x0.1%"
+STANDARD_PROFILE="300 -sharpen 0x0.5"
+FAST_PROFILE="200"
+
+PROFILE_ORDER="ultra high clean book shadow columns balanced standard fast"
+
+# Function to get profile settings
+get_profile_settings() {
+    local profile="$1"
+    case "$profile" in
+        "ultra") echo "$ULTRA_PROFILE" ;;
+        "high") echo "$HIGH_PROFILE" ;;
+        "clean") echo "$CLEAN_PROFILE" ;;
+        "book") echo "$BOOK_PROFILE" ;;
+        "shadow") echo "$SHADOW_PROFILE" ;;
+        "columns") echo "$COLUMNS_PROFILE" ;;
+        "balanced") echo "$BALANCED_PROFILE" ;;
+        "standard") echo "$STANDARD_PROFILE" ;;
+        "fast") echo "$FAST_PROFILE" ;;
+        *) echo "$STANDARD_PROFILE" ;;
+    esac
+}
+
+# Function to find available AI chat command for word quality analysis
+find_chat_command() {
+    for cmd in "ola" "fph" "fph2" "fnls"; do
+        # Check in current directory and PATH
+        if [[ -x "./$cmd" ]]; then
+            echo "./$cmd"
+            return 0
+        elif [[ -x "./ola_chat/$cmd" ]]; then
+            echo "./ola_chat/$cmd"
+            return 0
+        elif [[ -x "$OLA_DIR/$cmd" ]]; then
+            echo "$OLA_DIR/$cmd"
+            return 0
+        elif [[ -x "./ph_chat/$cmd" ]]; then
+            echo "./ph_chat/$cmd"
+            return 0
+        elif [[ -x "./ph2_chat/$cmd" ]]; then
+            echo "./ph2_chat/$cmd"
+            return 0
+        elif [[ -x "./nls_chat/$cmd" ]]; then
+            echo "./nls_chat/$cmd"
+            return 0
+        elif command -v "$cmd" >/dev/null 2>&1; then
+            echo "$cmd"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Function to analyze word quality using AI
+analyze_word_quality() {
+    local text_file="$1"
+    local chat_cmd=$(find_chat_command)
+    
+    if [[ -z "$chat_cmd" || ! -f "$text_file" ]]; then
+        echo "50"  # Default quality percentage
+        return 1
+    fi
+    
+    # Get sample of words for analysis
+    local sample_words=$(head -10 "$text_file" | tr ' ' '\n' | grep -v '^$' | head -20 | tr '\n' ' ')
+    
+    if [[ -z "$sample_words" ]]; then
+        echo "0"
+        return 1
+    fi
+    
+    # Create temporary file for AI analysis
+    local temp_file=$(mktemp)
+    cat > "$temp_file" << EOF
+Analyze the quality of these OCR-extracted words and estimate what percentage are real, meaningful words (not gibberish, symbols, or OCR errors):
+
+Sample words: $sample_words
+
+Please respond with ONLY a number between 0-100 representing the percentage of quality words. For example:
+- 95 = most words are real and correct
+- 70 = many real words but some OCR errors  
+- 30 = mostly gibberish with few real words
+- 5 = almost all gibberish/errors
+
+Respond with only the number:
+EOF
+    
+    # Get AI assessment
+    local quality_response=$("$chat_cmd" "$temp_file" 2>/dev/null | grep -o '[0-9][0-9]*' | head -1)
+    
+    rm "$temp_file"
+    
+    # Validate response (should be 0-100)
+    if [[ "$quality_response" =~ ^[0-9]+$ ]] && [[ $quality_response -le 100 ]]; then
+        echo "$quality_response"
+        return 0
+    else
+        echo "50"  # Default if AI fails
+        return 1
+    fi
+}
+
+# Function to detect language using AI
+detect_language_with_ai() {
+    local sample_text="$1"
+    local chat_cmd=$(find_chat_command)
+    
+    if [[ -z "$chat_cmd" ]]; then
+        echo "eng"
+        return 1
+    fi
+    
+    echo -n "🤖 Analyzing text for language detection... "
+    
+    # Debug: Show what we're analyzing
+    echo ""
+    echo "   Sample: $(echo "$sample_text" | tr '\n' ' ' | cut -c1-100)..."
+    
+    # Create temporary file with sample text
+    local temp_file=$(mktemp)
+    cat > "$temp_file" << EOF
+Document sample text for language detection:
+
+$sample_text
+
+Analyze this document text and determine the PRIMARY language of the content. Focus on the document's main language, not mixed-in foreign terms.
+
+IMPORTANT: Look for these specific language indicators:
+- German (deu): "DATUM, BESCHREIBUNG, ZAHLUNGSEINGANG, ZAHLUNGSAUSGANG, SALDO, Echtzeituberweisung" and compound words
+- German currency: "€" with comma decimal separator (500,00 €)
+- German banking terms: "SEPA", "Überweisung", compound words ending in "-ung, -eingang, -ausgang"
+
+- French (fra): Articles "le, la, les", accents é,è,à,ç
+- Spanish (spa): Articles "el, la, los", endings "-ción, -dad"  
+- English (eng): Articles "the, a, an", typical English sentence structure
+
+Even if there are English phrases mixed in (like "Incoming transfer"), determine the PRIMARY document language based on the majority of terms and document structure.
+
+IMPORTANT German banking terms to recognize:
+- DATUM, BESCHREIBUNG, ZAHLUNGSEINGANG, ZAHLUNGSAUSGANG, SALDO = German
+- Echtzeituberweisung, Überweisung = German banking terms
+- Currency format "500,00 €" = German/European format
+
+If you see these German banking terms, respond with: deu
+If mainly English terms, respond with: eng
+
+Respond with ONLY the 3-letter code (deu, eng, fra, spa, etc.):
+EOF
+    
+    # Use file chat command to analyze the text
+    local ai_response=$("$chat_cmd" "$temp_file" 2>/dev/null | grep -o '\b[a-z][a-z][a-z]\b' | head -1)
+    
+    rm "$temp_file"
+    
+    # Validate response (should be 3 letters)
+    if [[ "$ai_response" =~ ^[a-z]{3}$ ]]; then
+        echo "$ai_response"
+        return 0
+    else
+        echo "eng"
+        return 1
+    fi
+}
+
+# Function to calculate OCR quality score with AI word quality analysis
+calculate_quality_score() {
+    local text_file="$1"
+    
+    if [[ ! -f "$text_file" ]]; then
+        echo "0"
+        return
+    fi
+    
+    # Check if file has content
+    local file_size=$(wc -c < "$text_file" 2>/dev/null | tr -d ' ' || echo "0")
+    if [[ $file_size -eq 0 ]]; then
+        echo "0"
+        return
+    fi
+    
+    # Basic metrics
+    local word_count=$(wc -w < "$text_file" 2>/dev/null | tr -d ' ' || echo "0")
+    local line_count=$(wc -l < "$text_file" 2>/dev/null | tr -d ' ' || echo "1")
+    local char_count=$(wc -c < "$text_file" 2>/dev/null | tr -d ' ' || echo "0")
+    
+    # Get AI word quality assessment
+    echo -n "📊 Analyzing word quality with AI... "
+    local word_quality=$(analyze_word_quality "$text_file")
+    echo "$word_quality%"
+    
+    # Calculate word score with quality weighting
+    local word_score=0
+    if [[ $word_count -gt 0 ]]; then
+        # Base word score
+        local base_word_score=$((word_count * 2))
+        if [[ $base_word_score -gt 100 ]]; then base_word_score=100; fi
+        
+        # Apply quality multiplier (word_quality is 0-100, convert to 0.0-1.0)
+        word_score=$((base_word_score * word_quality / 100))
+    fi
+    
+    # Line structure score
+    local line_score=0
+    if [[ $line_count -gt 0 ]]; then
+        line_score=$((line_count * 3))
+        if [[ $line_score -gt 50 ]]; then line_score=50; fi
+    fi
+    
+    # Character density score (reasonable density indicates good structure)
+    if [[ $line_count -eq 0 ]]; then line_count=1; fi
+    local char_density=$((char_count / line_count))
+    local density_score=0
+    if [[ $char_density -gt 10 && $char_density -lt 200 ]]; then
+        density_score=30
+    elif [[ $char_density -gt 5 ]]; then
+        density_score=15
+    fi
+    
+    # Calculate final score
+    local final_score=$((word_score + line_score + density_score))
+    
+    echo "$final_score"
+}
+
+# Function to calculate quality score with detailed breakdown
+calculate_quality_score_debug() {
+    local text_file="$1"
+    
+    if [[ ! -f "$text_file" ]]; then
+        echo "0"
+        echo "0"
+        echo "❌ No file"
+        return
+    fi
+    
+    # Check if file has content
+    local file_size=$(wc -c < "$text_file" 2>/dev/null | tr -d ' ' || echo "0")
+    if [[ $file_size -eq 0 ]]; then
+        echo "0"
+        echo "0"  
+        echo "❌ Empty file"
+        return
+    fi
+    
+    # Get basic metrics
+    local word_count=$(wc -w < "$text_file" 2>/dev/null | tr -d ' ' || echo "0")
+    local line_count=$(wc -l < "$text_file" 2>/dev/null | tr -d ' ' || echo "1")
+    local char_count=$(wc -c < "$text_file" 2>/dev/null | tr -d ' ' || echo "0")
+    
+    # 1. Word Score (max 100)
+    local word_score=0
+    if [[ $word_count -gt 0 ]]; then
+        word_score=$((word_count * 2))
+        if [[ $word_score -gt 100 ]]; then word_score=100; fi
+    fi
+    
+    # 2. Line Score (max 50)
+    local line_score=0
+    if [[ $line_count -gt 0 ]]; then
+        line_score=$((line_count * 3))
+        if [[ $line_score -gt 50 ]]; then line_score=50; fi
+    fi
+    
+    # 3. Character Density Score (max 30)
+    if [[ $line_count -eq 0 ]]; then line_count=1; fi
+    local char_density=$((char_count / line_count))
+    local density_score=0
+    if [[ $char_density -gt 10 && $char_density -lt 200 ]]; then
+        density_score=30
+    elif [[ $char_density -gt 5 ]]; then
+        density_score=15
+    fi
+    
+    # Calculate final score
+    local final_score=$((word_score + line_score + density_score))
+    
+    # Output format: score, word_count, detailed breakdown
+    echo "$final_score"
+    echo "$word_count"
+    if [[ "$VERBOSE_MODE" == "true" ]]; then
+        echo "Score: $final_score (Words: $word_count × 2 = $word_score + Lines: $line_count × 3 = $line_score + Density: $char_density chars/line = $density_score)"
+    fi
+}
+
+# Function to test OCR quality on first page
+test_first_page_quality() {
+    local file="$1"
+    local lang="$2"
+    local test_dir=$(mktemp -d)
+    local best_profile=""
+    local best_score=0
+    local best_word_count=0
+    
+    # Arrays to store results for AI analysis (using indexed arrays as workaround)
+    local profile_list=()
+    local score_list=()
+    local word_count_list=()
+    local file_list=()
+    
+    if [[ "$VERBOSE_MODE" == "true" ]]; then
+        echo "🔍 Testing OCR quality on first page..."
+    fi
+    
+    # Extract first page
+    if [[ "$(echo "$file" | tr '[:upper:]' '[:lower:]')" =~ \.pdf$ ]]; then
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "📋 Extracting first page from PDF..."
+        fi
+        if ! magick -density 300 "${file}[0]" "$test_dir/test_page.png" 2>/dev/null; then
+            echo "❌ Failed to extract first page"
+            rm -rf "$test_dir"
+            return 1
+        fi
+    else
+        # For images, just copy
+        cp "$file" "$test_dir/test_page.png"
+    fi
+    
+    if [[ "$VERBOSE_MODE" == "true" ]]; then
+        echo "🧪 Testing quality profiles:"
+    else
+        echo -n "🔍 Testing OCR quality... "
+    fi
+    
+    # Language detection flag
+    local language_detected=false
+    local detected_language="$lang"
+    
+    # Test each profile
+    for profile in $PROFILE_ORDER; do
+        local settings=$(get_profile_settings "$profile")
+        local dpi=$(echo $settings | awk '{print $1}')
+        local enhancements=$(echo $settings | cut -d' ' -f2-)
+        
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo -n "   ⚙️  Testing $profile ($dpi DPI)... "
+        fi
+        
+        # Process with current profile
+        local temp_image="$test_dir/enhanced_${profile}.png"
+        
+        # Apply image enhancements
+        if [[ -n "$enhancements" ]]; then
+            magick "$test_dir/test_page.png" -density $dpi $enhancements "$temp_image" 2>/dev/null || \
+            magick "$test_dir/test_page.png" -density $dpi "$temp_image" 2>/dev/null
+        else
+            magick "$test_dir/test_page.png" -density $dpi "$temp_image" 2>/dev/null
+        fi
+        
+        # Determine PSM (Page Segmentation Mode)
+        local psm=6
+        if [[ "$profile" == "columns" || "$profile" == "book" ]]; then
+            psm=3 # Fully automatic page segmentation (better for multiple columns)
+        fi
+        
+        # Run OCR with text output
+        tesseract -l "$detected_language" --psm $psm --oem 3 \
+                  -c preserve_interword_spaces=1 \
+                  "$temp_image" "$test_dir/ocr_${profile}" 2>/dev/null || \
+        tesseract -l "$detected_language" --psm $psm \
+                  "$temp_image" "$test_dir/ocr_${profile}" 2>/dev/null
+        
+        # On first profile, detect language if needed (only if original language was 'eng')
+        if [[ "$profile" == "ultra" && "$lang" == "eng" && "$language_detected" == false ]]; then
+            if [[ -f "$test_dir/ocr_${profile}.txt" ]]; then
+                local sample_text=$(head -15 "$test_dir/ocr_${profile}.txt" | tr '\n' ' ')
+                
+                if [[ "$VERBOSE_MODE" == "true" ]]; then
+                    echo ""
+                    echo "📝 OCR Sample for language detection: $(echo "$sample_text" | head -c 100)..."
+                fi
+                
+                # Check for German banking terms first (with OCR error variants)
+                if echo "$sample_text" | grep -qi "KONTO.*BERSICHT\|KONTO.*ÜBERSICHT\|ZAHLUNGSEINGANG\|ZAHLUNGSAUSGANG\|BESCHREIBUNG\|ECHTZEITUBERWEISUNG\|ECHTZEIT.*BERWEISUNG\|ÜBERWEISUNG\|UBERWEISUNG\|EMPF.*NGER\|VERWENDUNGSZWECK\|DATUM.*TYP\|SALDO.*EUR\|Trade.*Republic.*Bank\|EUR.*SALDO"; then
+                    if [[ "$VERBOSE_MODE" == "true" ]]; then
+                        echo ""
+                        echo "🎯 Detected German banking terms, switching to German language..."
+                    fi
+                    detected_language="deu"
+                    language_detected=true
+                    # Re-run this profile with correct language
+                    tesseract -l "$detected_language" --psm 6 --oem 3 \
+                              -c preserve_interword_spaces=1 \
+                              "$temp_image" "$test_dir/ocr_${profile}" 2>/dev/null || \
+                    tesseract -l "$detected_language" --psm 6 \
+                              "$temp_image" "$test_dir/ocr_${profile}" 2>/dev/null
+                    echo -n "   ⚙️  Re-testing $profile with German... "
+                elif [[ $(echo "$sample_text" | wc -w) -gt 10 ]]; then
+                    echo ""
+                    echo -n "🤖 Detecting language from OCR sample... "
+                    local ai_detected_lang=$(detect_language_with_ai "$sample_text")
+                    if [[ "$ai_detected_lang" != "eng" ]]; then
+                        echo "detected: $ai_detected_lang"
+                        detected_language="$ai_detected_lang"
+                        language_detected=true
+                        # Re-run this profile with correct language
+                        tesseract -l "$detected_language" --psm 6 --oem 3 \
+                                  -c preserve_interword_spaces=1 \
+                                  "$temp_image" "$test_dir/ocr_${profile}" 2>/dev/null || \
+                        tesseract -l "$detected_language" --psm 6 \
+                                  "$temp_image" "$test_dir/ocr_${profile}" 2>/dev/null
+                        echo -n "   ⚙️  Re-testing $profile with $detected_language... "
+                    else
+                        echo "confirmed English"
+                        language_detected=true
+                    fi
+                fi
+            fi
+        fi
+        
+        # Calculate quality score with debug info
+        local score_details=$(calculate_quality_score_debug "$test_dir/ocr_${profile}.txt")
+        local score=$(echo "$score_details" | head -1)
+        local word_count=$(echo "$score_details" | sed -n '2p')
+        
+        echo "$score_details" | tail -n +3
+        
+        # Store profile results for potential AI analysis
+        profile_list+=("$profile")
+        score_list+=("$score")
+        word_count_list+=("$word_count")
+        file_list+=("$test_dir/ocr_${profile}.txt")
+        
+        # Track best profile (prefer higher word count when scores are equal)
+        if [[ $score -gt $best_score ]] || [[ $score -eq $best_score && $word_count -gt $best_word_count ]]; then
+            best_score=$score
+            best_profile=$profile
+            best_word_count=$word_count
+        fi
+        
+        # Continue testing all profiles (no early exit)
+    done
+    
+    # Check if AI analysis could help with efficiency optimization
+    if [[ "$VERBOSE_MODE" == "true" ]]; then
+        echo
+        echo "⚡ Optimizing for efficiency while maintaining quality..."
+    fi
+    
+    # Convert quality level to percentage threshold for AI analysis
+    local ai_threshold
+    case "$QUALITY_THRESHOLD" in
+        "1") ai_threshold=30 ;;  # Low quality acceptable
+        "2") ai_threshold=50 ;;  # Standard quality
+        "3") ai_threshold=70 ;;  # Balanced quality
+        "4") ai_threshold=85 ;;  # High quality
+        "5") ai_threshold=95 ;;  # Maximum quality
+        *) ai_threshold=70 ;;    # Default to balanced
+    esac
+    
+    # Define quality threshold (minimum acceptable AI quality percentage)
+    local min_quality_threshold=$ai_threshold
+    local min_score_threshold=40  # Minimum basic score to consider
+    
+    # Test all profiles with AI to find the most efficient acceptable one
+    if [[ "$VERBOSE_MODE" == "true" ]]; then
+        echo "🔍 Testing AI quality for all profiles to find optimal efficiency:"
+    fi
+    
+    local efficient_profile=""
+    local efficient_score=0
+    local efficient_quality=0
+    local profiles_tested=()
+    local qualities_tested=()
+    local scores_tested=()
+    
+    # Test profiles in order of efficiency (fastest to slowest)
+    local efficiency_order=("fast" "standard" "balanced" "high" "ultra")
+    
+    for profile in "${efficiency_order[@]}"; do
+        # Find this profile in our results
+        local profile_idx=-1
+        for i in "${!profile_list[@]}"; do
+            if [[ "${profile_list[$i]}" == "$profile" ]]; then
+                profile_idx=$i
+                break
+            fi
+        done
+        
+        if [[ $profile_idx -eq -1 ]]; then
+            continue  # Profile not found, skip
+        fi
+        
+        local profile_score=${score_list[$profile_idx]}
+        
+        # Skip profiles with very low basic scores
+        if [[ $profile_score -lt $min_score_threshold ]]; then
+            if [[ "$VERBOSE_MODE" == "true" ]]; then
+                echo "   ⏭️  Skipping $profile (score too low: $profile_score)"
+            fi
+            continue
+        fi
+        
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo -n "   🧠 Testing $profile (Score: $profile_score)... "
+        fi
+        local ai_quality=$(analyze_word_quality "${file_list[$profile_idx]}")
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "AI Quality: $ai_quality%"
+        fi
+        
+        profiles_tested+=("$profile")
+        qualities_tested+=("$ai_quality")
+        scores_tested+=("$profile_score")
+        
+        # If this profile meets our quality threshold, use it (since we're testing in efficiency order)
+        if [[ $ai_quality -ge $min_quality_threshold ]]; then
+            efficient_profile=$profile
+            efficient_score=$profile_score
+            efficient_quality=$ai_quality
+            if [[ "$VERBOSE_MODE" == "true" ]]; then
+                echo "   ✅ $profile meets quality threshold ($ai_quality% ≥ $min_quality_threshold%) - selecting for efficiency!"
+            fi
+            break
+        else
+            if [[ "$VERBOSE_MODE" == "true" ]]; then
+                echo "   ❌ $profile below threshold ($ai_quality% < $min_quality_threshold%)"
+            fi
+        fi
+    done
+    
+    # If no profile meets the threshold, use the one with highest AI quality
+    if [[ -z "$efficient_profile" ]]; then
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "   ⚠️  No profile meets quality threshold, selecting best available quality:"
+        fi
+        local best_ai_quality=0
+        for i in "${!profiles_tested[@]}"; do
+            if [[ ${qualities_tested[$i]} -gt $best_ai_quality ]]; then
+                best_ai_quality=${qualities_tested[$i]}
+                efficient_profile=${profiles_tested[$i]}
+                efficient_quality=$best_ai_quality
+                # Find score for this profile
+                for j in "${!profile_list[@]}"; do
+                    if [[ "${profile_list[$j]}" == "$efficient_profile" ]]; then
+                        efficient_score=${score_list[$j]}
+                        break
+                    fi
+                done
+            fi
+        done
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "   🎯 Selected $efficient_profile (best available: $efficient_quality%)"
+        fi
+    fi
+    
+    # Update final selection
+    best_profile=$efficient_profile
+    best_score=$efficient_score
+    
+    if [[ "$VERBOSE_MODE" == "true" ]]; then
+        echo
+        echo "🎯 Efficiency-optimized selection: $best_profile"
+        echo "📊 Quality: $efficient_quality% AI quality, Score: $best_score"
+        
+        # Show efficiency savings
+        case "$best_profile" in
+            "fast") echo "💨 Maximum efficiency: 200 DPI (fastest processing)" ;;
+            "standard") echo "⚡ High efficiency: 300 DPI (fast processing)" ;;
+            "balanced") echo "⚖️  Balanced efficiency: 450 DPI (moderate processing)" ;;
+            "high") echo "🔍 Lower efficiency: 600 DPI (slower processing)" ;;
+            "ultra") echo "🐌 Minimum efficiency: 900 DPI (slowest processing)" ;;
+        esac
+        echo "📊 Selected settings: $(get_profile_settings "$best_profile")"
+    fi
+    
+    # Store results in global variables
+    OPTIMAL_PROFILE=$best_profile
+    OPTIMAL_SETTINGS=$(get_profile_settings "$best_profile")
+    OPTIMAL_PSM=6
+    if [[ "$best_profile" == "columns" || "$best_profile" == "book" ]]; then
+        OPTIMAL_PSM=3
+    fi
+    DETECTED_LANGUAGE=$detected_language
+    
+    rm -rf "$test_dir"
+    return 0
+}
+
+# Check for required commands
+for cmd in tesseract magick; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Error: Required command '$cmd' not found."
+        echo "Please install:"
+        echo "  tesseract: brew install tesseract tesseract-lang"
+        echo "  magick: brew install imagemagick"
+        exit 1
+    fi
+done
+
+# Supported file extensions
+IMAGE_EXTENSIONS="jpg|jpeg|png|tiff|bmp|gif|webp"
+PDF_EXTENSION="pdf"
+
+# Function to process a single file (image or PDF)
+process_file() {
+    local FILE="$1"
+    local CURRENT_LANG="$2"
+    local OCR_OUTPUTS="$3"
+    OPTIMAL_PSM=6
+    
+    # Check if both quality and language were manually specified
+    if [[ "$USER_SPECIFIED_QUALITY" == "true" && "$USER_SPECIFIED_LANGUAGE" == "true" ]]; then
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "⚡ Both quality (-q) and language (-l) specified - skipping all auto-detection for maximum speed"
+            echo "📐 Using specified quality level: $QUALITY_THRESHOLD"
+            echo "🌐 Using specified language: $LANGUAGE"
+        fi
+        # Map quality level to appropriate profile settings
+        case "$QUALITY_THRESHOLD" in
+            "1") OPTIMAL_SETTINGS="$FAST_PROFILE" ;;     # 200 DPI
+            "2") OPTIMAL_SETTINGS="$STANDARD_PROFILE" ;; # 300 DPI
+            "3") OPTIMAL_SETTINGS="$BALANCED_PROFILE" ;; # 450 DPI
+            "4") OPTIMAL_SETTINGS="$HIGH_PROFILE" ;;     # 600 DPI
+            "5") OPTIMAL_SETTINGS="$ULTRA_PROFILE" ;;    # 900 DPI
+            *) OPTIMAL_SETTINGS="$STANDARD_PROFILE" ;;   # Default to 300 DPI
+        esac
+    elif [[ "$USER_SPECIFIED_QUALITY" == "true" ]]; then
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "🔍 Quality level specified ($QUALITY_THRESHOLD) - skipping DPI testing"
+            echo "🌐 Language auto-detection will be performed if needed"
+        fi
+        # Map quality level to appropriate profile settings
+        case "$QUALITY_THRESHOLD" in
+            "1") OPTIMAL_SETTINGS="$FAST_PROFILE" ;;     # 200 DPI
+            "2") OPTIMAL_SETTINGS="$STANDARD_PROFILE" ;; # 300 DPI
+            "3") OPTIMAL_SETTINGS="$BALANCED_PROFILE" ;; # 450 DPI
+            "4") OPTIMAL_SETTINGS="$HIGH_PROFILE" ;;     # 600 DPI
+            "5") OPTIMAL_SETTINGS="$ULTRA_PROFILE" ;;    # 900 DPI
+            *) OPTIMAL_SETTINGS="$STANDARD_PROFILE" ;;   # Default to 300 DPI
+        esac
+    elif [[ "$USER_SPECIFIED_LANGUAGE" == "true" ]]; then
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "🌐 Using specified language: $LANGUAGE"
+            echo "📐 Using standard 300 DPI processing (use -q to optimize)"
+        fi
+        OPTIMAL_SETTINGS="$DEFAULT_DPI"
+    else
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "🔍 Performing full auto-detection (language + DPI optimization)"
+        fi
+        # Set default quality level for auto-optimization (balanced)
+        QUALITY_THRESHOLD="3"
+        # Test quality on first page to determine optimal settings
+        if ! test_first_page_quality "$FILE" "$CURRENT_LANG"; then
+            echo "Warning: Quality test failed, using standard settings"
+            OPTIMAL_SETTINGS="$DEFAULT_DPI"
+        fi
+    fi
+    
+    # Extract optimal settings
+    local settings_array=($OPTIMAL_SETTINGS)
+    local optimal_dpi=${settings_array[0]}
+    local optimal_enhancements="${settings_array[@]:1}"
+    
+    if [[ "$VERBOSE_MODE" == "true" ]]; then
+        echo "🚀 Processing with optimal settings:"
+        echo "   📐 Resolution: $optimal_dpi DPI"
+        echo "   🔧 Enhancements: $optimal_enhancements"
+        echo "   🌐 Language: $DETECTED_LANGUAGE"
+        echo
+    fi
+    
+    local is_pdf=0
+    
+    # Extract the filename without the extension
+    FILENAME=$(basename "$FILE")
+    FILENAME_WITHOUT_EXT="${FILENAME%.*}"
+    
+    # Check if file is PDF
+    if [[ "$(echo "$FILE" | tr '[:upper:]' '[:lower:]')" =~ \.pdf$ ]]; then
+        is_pdf=1
+        echo "Processing PDF file: $FILENAME"
+        # Create temporary directory for PDF pages
+        local pdf_temp_dir=$(mktemp -d)
+        # Convert PDF to images with optimal quality settings
+        if [[ -n "$optimal_enhancements" ]]; then
+            if ! magick -density $optimal_dpi "$FILE" $optimal_enhancements "$pdf_temp_dir/page-%04d.png"; then
+                echo "Error: Failed to process PDF '$FILE'"
+                rm -rf "$pdf_temp_dir"
+                return 1
+            fi
+        else
+            if ! magick -density $optimal_dpi "$FILE" "$pdf_temp_dir/page-%04d.png"; then
+                echo "Error: Failed to process PDF '$FILE'"
+                rm -rf "$pdf_temp_dir"
+                return 1
+            fi
+        fi
+        # Process each page
+        local page_num=1
+        for page in "$pdf_temp_dir"/page-*.png; do
+            echo "Processing page $page_num..."
+            process_single_image "$page" "$CURRENT_LANG" "$OCR_OUTPUTS" "${FILENAME_WITHOUT_EXT}_page${page_num}"
+            ((page_num++))
+        done
+        rm -rf "$pdf_temp_dir"
+        # After processing all PDF pages, combine the outputs
+        combine_pdf_outputs "$FILENAME_WITHOUT_EXT" "$OCR_OUTPUTS"
+        return 0
+    fi
+    
+    # Process regular image
+    process_single_image "$FILE" "$CURRENT_LANG" "$OCR_OUTPUTS" "$FILENAME_WITHOUT_EXT"
+}
+
+# Function to process a single image
+process_single_image() {
+    local FILE="$1"
+    local CURRENT_LANG="$2"
+    local OCR_OUTPUTS="$3"
+    local OUTPUT_NAME="$4"
+    
+    # Create a temporary file with enhanced resolution and quality using optimal settings
+    local TEMP_FILE=$(mktemp)
+    if [[ -n "$optimal_enhancements" ]]; then
+        if ! magick "$FILE" -density $optimal_dpi $optimal_enhancements "$TEMP_FILE" 2>/dev/null; then
+            echo "Error: Failed to process '$FILE'. Not a valid image?"
+            rm "$TEMP_FILE"
+            return 1
+        fi
+    else
+        if ! magick "$FILE" -density $optimal_dpi "$TEMP_FILE" 2>/dev/null; then
+            echo "Error: Failed to process '$FILE'. Not a valid image?"
+            rm "$TEMP_FILE"
+            return 1
+        fi
+    fi
+
+    # Try to detect language if user didn't specify one
+    if [[ "$USER_SPECIFIED_LANGUAGE" != "true" ]]; then
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo -n "Analyzing '$(basename "$FILE")' for language... "
+        fi
+        if detect_language "$TEMP_FILE"; then
+            # Automatically use detected language
+            CURRENT_LANG="script/$detected_script"
+            if [[ "$VERBOSE_MODE" == "true" ]]; then
+                echo "detected $detected_script, using it for OCR"
+            fi
+        else
+            if [[ "$VERBOSE_MODE" == "true" ]]; then
+                echo "could not detect script, using default ($LANGUAGE)"
+            fi
+        fi
+    fi
+    
+    # Generate versioned output filename
+    local base_output_name="${OCR_OUTPUTS}/ocr_${OUTPUT_NAME}"
+    local versioned_output=$(get_versioned_filename "$base_output_name" "txt")
+    local output_base=$(echo "$versioned_output" | sed 's/\.txt$//')
+    
+    # Perform OCR using tesseract with enhanced settings for better accuracy
+    tesseract -l "$CURRENT_LANG" --psm $OPTIMAL_PSM --oem 3 -c preserve_interword_spaces=1 "$TEMP_FILE" "$output_base"
+    # Check if tesseract executed successfully
+    if [ $? -eq 0 ]; then
+        output_file="$versioned_output"
+        if [ -s "$output_file" ]; then
+            echo "✓ OCR output for '$(basename "$FILE")' saved to $(basename "$output_file") ($(wc -l < "$output_file" | tr -d ' ') lines)"
+            
+            # Generate AI summary if requested
+            if [ "$AI_SUMMARIZE" = "true" ]; then
+                generate_ai_summary "$output_file" "$FILE" "$OCR_OUTPUTS" "$CURRENT_LANG"
+            fi
+        else
+            echo "! OCR completed for '$(basename "$FILE")' but no text was found"
+        fi
+    else
+        echo "✗ Error: OCR failed to process '$(basename "$FILE")'"
+    fi
+    
+    # Remove the temporary file
+    rm "$TEMP_FILE"
+}
+
+# Function to generate AI summarization of OCR text
+generate_ai_summary() {
+    local ocr_file="$1"
+    local base_name="$2"
+    local ocr_outputs_dir="$3"
+    local current_lang="$4"
+    
+    if [ ! -s "$ocr_file" ]; then
+        echo "! No text found in OCR output for AI summarization"
+        return 1
+    fi
+
+    echo -n "🤖 Generating AI summary for '$(basename "$base_name")'... "
+    
+    # Create versioned AI summary filename
+    local base_ai_name="${ocr_outputs_dir}/$(basename "$base_name" | sed 's/\.[^.]*$//')_ai"
+    local ai_file=$(get_versioned_filename "$base_ai_name" "txt")
+    
+    # Read the OCR text
+    local ocr_text=$(cat "$ocr_file")
+    
+    # Check if text is too short for meaningful summarization
+    local word_count=$(echo "$ocr_text" | wc -w | tr -d ' ')
+    if [ "$word_count" -lt 10 ]; then
+        echo "skipped (too short: $word_count words)"
+        return 1
+    fi
+    
+    # Determine language for AI prompt
+    local prompt_language="English"
+    local summary_instruction="Please provide a concise summary of this document text in English."
+    
+    case "$current_lang" in
+        *deu*|*ger*|script/Latin)
+            if echo "$ocr_text" | grep -q -E "(der|die|das|und|ist|ein|eine|mit|für|von|zu|auf|an|in|bei|nach|vor|über|unter|zwischen|durch|gegen|ohne|um|seit|bis|während|wegen|trotz)"; then
+                prompt_language="German"
+                summary_instruction="Bitte erstellen Sie eine prägnante Zusammenfassung dieses Dokumenttextes auf Deutsch."
+            fi
+            ;;
+        *fra*|*fre*)
+            if echo "$ocr_text" | grep -q -E "(le|la|les|de|du|des|et|est|un|une|avec|pour|par|dans|sur|sous|entre|contre|sans|depuis|pendant|avant|après|vers)"; then
+                prompt_language="French"
+                summary_instruction="Veuillez fournir un résumé concis de ce texte de document en français."
+            fi
+            ;;
+        *spa*)
+            if echo "$ocr_text" | grep -q -E "(el|la|los|las|de|del|y|es|un|una|con|para|por|en|sobre|bajo|entre|contra|sin|desde|durante|antes|después|hacia)"; then
+                prompt_language="Spanish"
+                summary_instruction="Por favor, proporcione un resumen conciso de este texto del documento en español."
+            fi
+            ;;
+        *ita*)
+            if echo "$ocr_text" | grep -q -E "(il|la|lo|gli|le|di|del|della|e|è|un|una|con|per|da|in|su|sotto|tra|contro|senza|durante|prima|dopo|verso)"; then
+                prompt_language="Italian"
+                summary_instruction="Si prega di fornire un riassunto conciso di questo testo del documento in italiano."
+            fi
+            ;;
+        *rus*)
+            if echo "$ocr_text" | grep -q -E "(и|в|на|с|по|для|от|до|за|при|над|под|между|через|против|без|из|о|об|про|к|у|около)"; then
+                prompt_language="Russian"
+                summary_instruction="Пожалуйста, предоставьте краткое изложение этого текста документа на русском языке."
+            fi
+            ;;
+    esac
+    
+    # Create language-aware AI prompt
+    local ai_prompt="$summary_instruction Focus on the main topics, key information, and document type/purpose. Keep it under 200 words:
+
+$ocr_text"
+    
+    # Call AI for summarization
+    local ai_summary
+    if [[ "$AI_OFFLINE_ONLY" == "true" ]]; then
+        # Force Ollama-only mode (offline)
+        if command -v ollama >/dev/null 2>&1; then
+            ai_summary=$(echo "$ai_prompt" | ollama run llama3.2:1b 2>/dev/null | head -20)
+        else
+            echo "✗ Ollama not available (offline mode requested)"
+            return 1
+        fi
+    elif command -v ollama >/dev/null 2>&1; then
+        # Use Ollama as primary choice
+        ai_summary=$(echo "$ai_prompt" | ollama run llama3.2:1b 2>/dev/null | head -20)
+    else
+        # Fallback to chat commands (ph, ph2, nls) for summarization
+        local chat_cmd=$(find_chat_command)
+        if [[ -n "$chat_cmd" ]]; then
+            # Create temporary file with OCR text
+            local temp_file=$(mktemp)
+            echo "$ocr_text" > "$temp_file"
+            
+            # Use chat command with proper summarization instruction
+            ai_summary=$("$chat_cmd" "$temp_file" "$summary_instruction Focus on main topics, key information, and document type/purpose. Keep it under 200 words." 2>/dev/null | head -20)
+            rm "$temp_file"
+        else
+            # Final fallback to basic text analysis
+            ai_summary="Document Summary:
+Length: $(echo "$ocr_text" | wc -w | tr -d ' ') words
+Lines: $(echo "$ocr_text" | wc -l | tr -d ' ') lines
+Preview: $(echo "$ocr_text" | head -3 | tr '\n' ' ' | cut -c1-200)...
+Key topics: $(echo "$ocr_text" | tr ' ' '\n' | sort | uniq -c | sort -nr | head -5 | awk '{print $2}' | tr '\n' ' ')"
+        fi
+    fi
+    
+    if [ -n "$ai_summary" ]; then
+        # Save AI summary to file
+        cat > "$ai_file" << EOF
+AI SUMMARY - Generated by docr $(date)
+Source: $(basename "$base_name")
+Language: $prompt_language (OCR: $current_lang)
+===========================================
+
+$ai_summary
+
+===========================================
+Original OCR Text ($word_count words):
+
+$ocr_text
+EOF
+        echo "✓ saved to $(basename "$ai_file")"
+        return 0
+    else
+        echo "✗ AI summarization failed"
+        return 1
+    fi
+}
+
+# Function to show just language codes
+show_lang_codes() {
+    local lang_file="$(dirname "$0")/.tesseract.lang.list"
+    
+    if [ -f "$lang_file" ]; then
+        cat "$lang_file"
+    else
+        echo "Error: Language list file not found"
+        exit 1
+    fi
+    exit 0
+}
+
+# Function to show language help
+show_lang_help() {
+    local script_name=$(basename "$0")
+    local lang_file="$(dirname "$0")/.tesseract.lang.list"
+    
+    cat << EOF
+OCR (Optical Character Recognition) Tool
+
+Usage:
+    docr <file_or_directory>          Process with auto-detection (quality level 2)
+    docr -l <lang> <file>             Process with specific language  
+    docr -q <1-5> <file>              Select quality level (1=fastest, 5=best)
+    docr -ai <file>                   Process with AI summarization (creates .ai.txt)
+    docr -aio <file>                  Process with offline AI only (Ollama required)
+    docr -h, --help                   Show detailed help
+
+Examples:
+    docr document.pdf                 # Auto-detect language, quality level 2 (300 DPI)
+    docr -l deu german_doc.pdf        # Process in German, quality level 2 (300 DPI)  
+    docr -q 4 important.pdf           # High quality processing (600 DPI)
+    docr -ai contract.pdf             # OCR + AI summary (creates .txt and .ai.txt)
+    docr -aio report.pdf              # OCR + offline AI summary (Ollama only)
+    docr -q 1 quick_scan.pdf          # Fastest processing (200 DPI)
+    docr -q 5 perfect_doc.pdf         # Maximum quality processing (900 DPI)
+
+For detailed options and language lists, use: docr -h or docr --help
+EOF
+}
+
+# Function to show full language list
+show_full_list() {
+    local lang_file="$(dirname "$0")/.tesseract.lang.list"
+    if [ -f "$lang_file" ]; then
+        cat "$lang_file"
+    else
+        echo "Error: Language list file not found"
+        exit 1
+    fi
+    exit 0
+}
+
+# Help function
+show_help() {
+    local script_name=$(basename "$0")
+    cat << EOF
+Usage: $script_name [options] <file1> [file2 ...]
+
+Process images and PDFs with OCR (Optical Character Recognition)
+
+Options:
+    -l, --lang <lang>     Specify OCR language (default: auto-detect via AI)
+    -s, --script <script> Use specific writing system (e.g., Latin, Cyrillic)
+    -q, --quality <1-5>   Select quality level (default: 2)
+                         • 1 = 200 DPI (fastest processing)
+                         • 2 = 300 DPI (standard processing, default)
+                         • 3 = 450 DPI (balanced processing)
+                         • 4 = 600 DPI (high quality processing)
+                         • 5 = 900 DPI (maximum quality, slowest)
+                         
+                         When language (-l) is specified: uses direct DPI mapping above.
+                         When language is NOT specified: tests multiple DPI levels and
+                         selects fastest DPI that meets the quality threshold via AI analysis.
+    -ai, --ai            Generate AI summarization of OCR text (creates .ai.txt file)
+                         Uses Ollama (Llama 3.2) or falls back to local chat commands.
+                         Summary created in same language as detected document.
+    -aio, --ai-offline   Generate AI summarization using only Ollama (offline mode)
+                         Requires Ollama to be installed. Fails if not available.
+    --list               Show available language codes
+    --full-list         Show detailed language and script information
+    -h, --help          Show this help message
+
+Language Detection & Processing:
+    Default behavior (no -q flag):
+    • Extract text sample from first page/image
+    • Use AI to auto-detect document language
+    • Process with quality level 2 (300 DPI - good quality, reasonable speed)
+    
+    Quality optimization (with -q flag):
+    • Test 5 DPI levels: 200 (fast), 300, 450, 600, 900 (slow/high-quality)
+    • Quality levels directly map to DPI settings:
+      - Level 1 = 200 DPI (fastest)
+      - Level 2 = 300 DPI (standard, default)
+      - Level 3 = 450 DPI (balanced)
+      - Level 4 = 600 DPI (high quality)
+      - Level 5 = 900 DPI (maximum quality)
+    • Special recognition for German banking documents
+
+Supported file types:
+    Images: jpg, jpeg, png, tiff, bmp, gif, webp
+    Documents: pdf (will process each page separately)
+
+Examples:
+    $script_name image.jpg                    # Auto-detect language, quality level 2 (300 DPI)
+    $script_name -l fra document.pdf          # Force French language, quality level 2 (300 DPI)
+    $script_name -q 3 large_doc.pdf           # Balanced quality processing (450 DPI)
+    $script_name -q 4 important.pdf           # High quality processing (600 DPI)
+    $script_name -q 1 bulk_scan.pdf           # Fastest processing (200 DPI)
+    $script_name -q 5 archive.pdf             # Maximum quality processing (900 DPI)
+    $script_name -ai contract.pdf             # OCR with AI summary (creates .txt + .ai.txt)
+    $script_name -aio sensitive.pdf           # OCR with offline AI only (privacy mode)
+    $script_name --script Latin *.jpg         # Process all JPGs with Latin script
+    $script_name --list                       # Show available languages
+
+Output:
+    - Creates 'OCR_OUTPUTS' folder in the same directory as input
+    - One text file per processed file
+    - PDFs generate one combined file with page markers
+EOF
+
+    # Always show the curated common languages list
+    echo ""
+    echo "Common languages:"
+    echo "  eng: English (default)"
+    echo "  deu: German"
+    echo "  fra: French"
+    echo "  spa: Spanish"
+    echo "  por: Portuguese"
+    echo "  ita: Italian"
+    echo "  nld: Dutch"
+    echo "  rus: Russian"
+    echo ""
+    echo "Common writing systems (scripts):"
+    echo "  Latin: A,B,C... (English, German, French, Spanish, Italian, etc.)"
+    echo "  Cyrillic: А,Б,В... (Russian, Bulgarian, Serbian, etc.)"
+    echo "  Arabic: ع,ب,ت... (Arabic, Persian, Urdu, etc.)"
+    echo "  Han: 中,文,字... (Chinese characters)"
+}
+
+# Function to combine multi-page outputs
+combine_pdf_outputs() {
+    local base_name="$1"
+    local output_dir="$2"
+    
+    # Generate versioned filename for combined output
+    local base_combined_file="${output_dir}/ocr_${base_name}"
+    local versioned_combined_file=$(get_versioned_filename "$base_combined_file" "txt")
+    local temp_file=$(mktemp)
+    
+    # Find all pages for this PDF
+    local pages=("${output_dir}/ocr_${base_name}_page"*.txt)
+    
+    # Check if we found any pages
+    if [ ${#pages[@]} -eq 0 ]; then
+        echo "No pages found for $base_name"
+        return 1
+    fi
+    
+    # Add page markers and combine
+    for page in "${pages[@]}"; do
+        page_num=$(echo "$page" | grep -o 'page[0-9]*' | grep -o '[0-9]*')
+        echo -e "\n=== Page $page_num ===\n" >> "$temp_file"
+        cat "$page" >> "$temp_file"
+        rm "$page"  # Remove individual page file
+    done
+    
+    # Move combined file to final versioned location
+    mv "$temp_file" "$versioned_combined_file"
+    echo "✓ Combined output saved to $(basename "$versioned_combined_file")"
+}
+
+# Function to get next available filename with versioning
+get_versioned_filename() {
+    local base_file="$1"
+    local extension="$2"
+    
+    # If original doesn't exist, use it
+    if [ ! -f "${base_file}.${extension}" ]; then
+        echo "${base_file}.${extension}"
+        return
+    fi
+    
+    # Find next available version number
+    local counter=1
+    while [ -f "${base_file}(${counter}).${extension}" ]; do
+        counter=$((counter + 1))
+    done
+    
+    echo "${base_file}(${counter}).${extension}"
+}
+
+# Check if no arguments provided - show help and language list
+if [ $# -eq 0 ]; then
+    show_lang_help
+    exit 0
+fi
+
+# Initialize variables
+LANGUAGE="eng"
+QUALITY_THRESHOLD=""  # Will be set to 3 (balanced) if user doesn't specify
+USER_SPECIFIED_LANGUAGE=""  # Track if user manually set language
+USER_SPECIFIED_QUALITY=""   # Track if user manually set quality
+AI_SUMMARIZE=""       # Track if user wants AI summarization
+AI_OFFLINE_ONLY=""    # Track if user wants Ollama-only summarization
+VERBOSE_MODE=""       # Track if user wants verbose output
+DEFAULT_DPI="300"     # Standard OCR resolution
+TARGET_PATH=""
+
+# Process arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -l|--lang)
+            if [ -n "$2" ]; then
+                LANGUAGE="$2"
+                USER_SPECIFIED_LANGUAGE="true"
+                shift 2
+            else
+                echo "Error: Language code required after -l/--lang"
+                exit 1
+            fi
+            ;;
+        -s|--script)
+            if [ -n "$2" ]; then
+                LANGUAGE="script/$2"
+                USER_SPECIFIED_LANGUAGE="true"
+                shift 2
+            else
+                echo "Error: Script name required after -s/--script"
+                exit 1
+            fi
+            ;;
+        -q|--quality)
+            if [ -n "$2" ] && [[ "$2" =~ ^[1-5]$ ]]; then
+                QUALITY_THRESHOLD="$2"
+                USER_SPECIFIED_QUALITY="true"
+                shift 2
+            else
+                echo "Error: Quality level must be 1-5 after -q/--quality"
+                echo "  1 = 200 DPI (fastest)"
+                echo "  2 = 300 DPI (standard, default)"
+                echo "  3 = 450 DPI (balanced)"
+                echo "  4 = 600 DPI (high quality)"
+                echo "  5 = 900 DPI (maximum quality, slowest)"
+                exit 1
+            fi
+            ;;
+        -ai|--ai)
+            AI_SUMMARIZE="true"
+            shift
+            ;;
+        -aio|--ai-offline)
+            AI_SUMMARIZE="true"
+            AI_OFFLINE_ONLY="true"
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE_MODE="true"
+            shift
+            ;;
+        --list)
+            show_lang_codes
+            exit 0
+            ;;
+        --full-list)
+            show_lang_help
+            exit 0
+            ;;
+        -*)
+            echo "Error: Unknown parameter '$1'"
+            show_help
+            exit 1
+            ;;
+        *)
+            if [ -z "$TARGET_PATH" ]; then
+                TARGET_PATH="$1"
+                shift
+            else
+                echo "Error: Multiple target paths specified: '$TARGET_PATH' and '$1'"
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+# Check if target path was provided
+if [ -z "$TARGET_PATH" ]; then
+    echo "Error: No target file or directory specified"
+    show_help
+    exit 1
+fi
+
+# Handle file or directory
+if [ ! -e "$TARGET_PATH" ]; then
+    echo "Error: '$TARGET_PATH' does not exist"
+    exit 1
+fi
+
+# Check if we can access the directory (especially important for macOS Desktop)
+if [ -d "$TARGET_PATH" ]; then
+    if ! ls "$TARGET_PATH" >/dev/null 2>&1; then
+        echo "Error: Cannot access directory '$TARGET_PATH'"
+        echo "This is likely a macOS permission issue."
+        echo ""
+        echo "To fix Desktop access:"
+        echo "1. Go to System Preferences > Security & Privacy > Privacy"
+        echo "2. Select 'Full Disk Access' on the left"
+        echo "3. Click the lock to make changes"
+        echo "4. Add your terminal application (Terminal.app or iTerm.app)"
+        echo ""
+        echo "Alternative: Copy files to ~/Documents or another accessible directory"
+        exit 1
+    fi
+fi
+
+# Set up OCR_OUTPUTS directory
+if [ -d "$TARGET_PATH" ]; then
+    # If target is a directory, create OCR_OUTPUTS inside it
+    OCR_OUTPUTS="$TARGET_PATH/OCR_OUTPUTS"
+    # Collect all supported files in the directory
+    FILES=()
+    while IFS= read -r -d '' file; do
+        FILES+=("$file")
+    done < <(find "$TARGET_PATH" -maxdepth 1 -type f \( -iname "*.pdf" -o -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.tiff" -o -iname "*.bmp" -o -iname "*.gif" -o -iname "*.webp" \) -print0)
+else
+    # If target is a file, create OCR_OUTPUTS in its directory
+    OCR_OUTPUTS="$(dirname "$TARGET_PATH")/OCR_OUTPUTS"
+    FILES=("$TARGET_PATH")
+fi
+
+# Create output directory
+mkdir -p "$OCR_OUTPUTS"
+
+# Check if any files were found
+if [ ${#FILES[@]} -eq 0 ]; then
+    echo "Error: No supported files found in '$TARGET_PATH'"
+    echo "Supported formats: pdf, jpg, jpeg, png, tiff, bmp, gif, webp"
+    echo ""
+    echo "Troubleshooting:"
+    echo "1. Check if the directory is accessible (macOS may require Full Disk Access)"
+    echo "2. For Desktop access, go to System Preferences > Security & Privacy > Privacy > Full Disk Access"
+    echo "3. Try copying files to a different directory (e.g., ~/Documents)"
+    echo "4. Or run: cp ~/Desktop/*.{pdf,jpg,jpeg,png} ~/Documents/ (if files exist)"
+    echo ""
+    echo "Alternative: Try processing a single file directly:"
+    echo "  graph_pdf_ocr /path/to/your/file.pdf"
+    exit 1
+fi
+
+# Function to get language description
+get_lang_description() {
+    local lang_code="$1"
+    local lang_file="$(dirname "$0")/.tesseract.lang.list"
+    if [ -f "$lang_file" ]; then
+        grep -E "\*\*${lang_code}\*\* -" "$lang_file" | 
+        sed -E 's/^[0-9]+\. \*\*([^*]*)\*\* - (.*)/\2/'
+    fi
+}
+
+# Function to detect script and language
+detect_language() {
+    local img="$1"
+    # First try OSD to detect script
+    local script_output
+    script_output=$(tesseract "$img" stdout --psm 0 2>/dev/null)
+    
+    # Try to get the script name from the output
+    detected_script=$(echo "$script_output" | grep "Script:" | cut -d' ' -f2)
+    
+    if [ -n "$detected_script" ]; then
+        local desc
+        desc=$(get_lang_description "script/$detected_script")
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            if [ -n "$desc" ]; then
+                echo "Detected script: $detected_script ($desc)"
+            else
+                echo "Detected script: $detected_script"
+            fi
+        fi
+        
+        # If available, try the specific script detector
+        if [ -f "/opt/homebrew/share/tessdata/script/$detected_script.traineddata" ]; then
+            if [[ "$VERBOSE_MODE" == "true" ]]; then
+                echo "Running detailed script detection..."
+            fi
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Initialize language detection
+DETECTED_LANGUAGE="$LANGUAGE"  # Will be updated during quality testing if auto-detection is used
+
+# Process files based on arguments and extensions
+for FILE in "${FILES[@]}"; do
+    # Skip if file doesn't exist
+    if [ ! -f "$FILE" ]; then
+        echo "Error: File not found: $FILE"
+        continue
+    fi
+    
+    # Check if file extension is supported
+    if [[ ! "$(echo "$FILE" | tr '[:upper:]' '[:lower:]')" =~ \.(${IMAGE_EXTENSIONS}|${PDF_EXTENSION})$ ]]; then
+        echo "Error: Unsupported file type for '$FILE'. Supported extensions: ${IMAGE_EXTENSIONS}, ${PDF_EXTENSION}"
+        continue
+    fi
+    
+    # Process the file with detected language
+    process_file "$FILE" "$DETECTED_LANGUAGE" "$OCR_OUTPUTS"
+done
+
+# Success message
+echo "Done! OCR outputs saved in $OCR_OUTPUTS/"

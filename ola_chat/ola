@@ -1,0 +1,183 @@
+#!/bin/bash
+#==============================================================================
+# OLA - Streaming Ollama chat backend with JSONL history
+#==============================================================================
+set -o pipefail
+# Resolve siblings relative to this script (not $HOME) so the test
+# harness can sandbox state paths while still finding our Python helpers
+# and lib_chat.sh in the real project directory.
+OLA_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(cd "$OLA_SCRIPT_DIR/.." && pwd)/lib_chat.sh"
+
+OLA_VERSION="2.2.1"
+
+show_help() {
+    cat << EOF
+Usage: ola [options] <message>
+
+Sends <message> to Ollama with the active session's prompt + summary +
+sliding window, streams the response token-by-token to stdout, and writes
+the final text to \$LAST_RESPONSE_FILE.
+
+Options:
+  -m, --model <name>      Override the active model for this call.
+  -h, --help              Show this help.
+  -v, --version           Show ola version.
+
+Environment:
+  OLLAMA_API              Default http://localhost:11434
+  OLA_CURL_TIMEOUT        Streaming timeout in seconds (default 600).
+  SLIDING_WINDOW          Recent messages kept verbatim (default 20).
+EOF
+}
+
+# error_exit, SESSION_PROMPT, SESSION_SUMMARY all come from lib_chat.sh.
+# The redundant local copies that used to live here were re-computing the
+# same values that lib_chat.sh already exports at source time.
+
+OLLAMA_MODEL=$(active_model)
+
+# Parse arguments
+MESSAGE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -m|--model)      [[ -n "$2" ]] || error_exit "-m/--model requires a model name."
+                         OLLAMA_MODEL="$2"; shift 2 ;;
+        -h|--help)       show_help; exit 0 ;;
+        -v|--version)    echo "ola $OLA_VERSION"; exit 0 ;;
+        *)               MESSAGE="$*"; break ;;
+    esac
+done
+
+[[ -z "$MESSAGE" ]] && { show_help; exit 1; }
+
+# Fail fast (and clearly) if Ollama isn't reachable. Catches the case
+# where the daemon dies mid-session, not only at chati startup.
+if ! ollama_running; then
+    log_chat "ola: ollama not reachable at $OLLAMA_API"
+    error_exit "Ollama is not running at $OLLAMA_API. Run: ollama serve  (or restart chati to auto-start it)"
+fi
+
+# Append user turn as JSONL. Ensure the session dir exists first (a fresh
+# session or a wiped tree would otherwise drop the turn silently), and
+# remember the line count so we can ROLL BACK this user turn if the
+# stream fails — otherwise a failed turn leaves a dangling user message
+# with no assistant reply, corrupting the next payload.
+mkdir -p "$(dirname "$MESSAGES_FILE")" 2>/dev/null
+# If the file exists and its last byte isn't a newline (a hand-edited or
+# truncated history), a bare >> would glue our JSON object onto the last
+# line — jq's per-line parse then drops BOTH turns from the context.
+# Ensure a separating newline first.
+if [[ -s "$MESSAGES_FILE" ]] && [[ -n "$(tail -c1 "$MESSAGES_FILE")" ]]; then
+    printf '\n' >> "$MESSAGES_FILE"
+fi
+MSG_LINES_BEFORE=$(wc -l < "$MESSAGES_FILE" 2>/dev/null | tr -d ' '); MSG_LINES_BEFORE=${MSG_LINES_BEFORE:-0}
+if ! jq -nc --arg c "$MESSAGE" '{role:"user",content:$c}' >> "$MESSAGES_FILE"; then
+    error_exit "Could not write to $MESSAGES_FILE (session dir missing or unwritable)."
+fi
+
+# Truncate the message buffer back to before this user turn. Called on any
+# failure after the append so history stays consistent.
+rollback_user_turn() {
+    local tmp
+    tmp=$(mktemp) || return 0
+    head -n "$MSG_LINES_BEFORE" "$MESSAGES_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$MESSAGES_FILE"
+}
+
+# Per-session companions, end-trimmed like the old python helper did.
+PROMPT_CONTENT=""
+[[ -n "$SESSION_PROMPT" && -s "$SESSION_PROMPT" ]] && PROMPT_CONTENT=$(trim_ws "$(cat "$SESSION_PROMPT")")
+SUMMARY_CONTENT=""
+[[ -n "$SESSION_SUMMARY" && -s "$SESSION_SUMMARY" ]] && SUMMARY_CONTENT=$(trim_ws "$(cat "$SESSION_SUMMARY")")
+
+# Build the payload with jq: system prompt + summary + optional
+# OLA_EXTRA_SYSTEM (agent mode), then the last $SLIDING_WINDOW turns.
+# parse_line accepts both JSONL ({role,content}) and the legacy
+# "role: content" line format (with \n escapes) — fromjson? falls
+# through to the capture when the line isn't JSON.
+PAYLOAD_FILE=$(mktemp)
+trap 'rm -f "$PAYLOAD_FILE"' EXIT
+tail -n "${SLIDING_WINDOW:-20}" "$MESSAGES_FILE" 2>/dev/null | jq -R -s \
+    --arg model "$OLLAMA_MODEL" \
+    --arg prompt "$PROMPT_CONTENT" \
+    --arg summary "$SUMMARY_CONTENT" \
+    --arg extra "${OLA_EXTRA_SYSTEM:-}" '
+    def parse_line:
+        fromjson? // (capture("^(?<role>[A-Za-z]+): (?<content>.*)$")
+                      | .content |= gsub("\\\\n"; "\n"));
+    (split("\n")
+     | map(select(length > 0)
+           | (parse_line? // empty)
+           | select((.role? != null) and (.content? != null)))) as $hist |
+    { model: $model,
+      messages:
+        ((if $prompt  != "" then [{role:"system", content:$prompt}] else [] end) +
+         (if $summary != "" then [{role:"system", content:("[CONVERSATION SUMMARY]:\n" + $summary)}] else [] end) +
+         (if $extra   != "" then [{role:"system", content:$extra}] else [] end) +
+         $hist),
+      stream: true,
+      options: { num_predict: 4096 } }' > "$PAYLOAD_FILE"
+
+# Reset side-channel for chati to consume after the stream.
+: > "$LAST_RESPONSE_FILE"
+
+# Thinking indicator; cleared by the first-byte stage below as soon as
+# the first token arrives.
+printf "🤔 " >&2
+
+# Stream pipeline, all standard tools:
+#   curl   — POSTs and emits Ollama's NDJSON chunks as they arrive
+#   jq -j  — unbuffered: prints each chunk's .message.content with no
+#            added newlines; an {"error": ...} chunk aborts via
+#            halt_error(1) which also prints the message to stderr
+#   read   — consumes exactly one byte to clear the 🤔 glyph at
+#            first-token time, re-emits it, then cat streams the rest
+#            (splitting a multibyte char is harmless: byte sequence is
+#            preserved across printf+cat)
+#   tee    — mirrors the full reply into the side-channel file
+if ! curl -sS --no-buffer --max-time "${OLA_CURL_TIMEOUT:-600}" \
+        -X POST "$OLLAMA_API/api/chat" \
+        -H "Content-Type: application/json" \
+        --data-binary "@$PAYLOAD_FILE" \
+    | jq -j --unbuffered \
+        'if .error then ("\nOllama error: \(.error)\n" | halt_error(1))
+         else (.message.content // "") end' \
+    | { if IFS= read -r -n 1 first_byte; then
+            printf '\r   \r' >&2
+            # read strips a delimiter newline: empty var on success
+            # means the first byte WAS a newline — re-emit it.
+            if [[ -z "$first_byte" ]]; then printf '\n'; else printf '%s' "$first_byte"; fi
+        fi
+        cat; } \
+    | tee "$LAST_RESPONSE_FILE"; then
+    echo "" >&2
+    log_chat "ola: streaming failed (model=$OLLAMA_MODEL)"
+    rollback_user_turn
+    error_exit "Streaming failed — no response, a timeout, or a non-JSON error (e.g. a proxy 5xx)." \
+        "Check that Ollama is reachable at $OLLAMA_API."
+fi
+
+# Trailing newline so the next prompt starts on a fresh line.
+echo ""
+
+if [[ ! -s "$LAST_RESPONSE_FILE" ]]; then
+    printf "\r   \r" >&2
+    log_chat "ola: empty response (model=$OLLAMA_MODEL)"
+    # Probe whether the model is even installed so we can tell the user
+    # something useful instead of a generic "empty response". Match the
+    # model name tolerantly: Ollama lists "gemma4:latest" but the user may
+    # have set just "gemma4" (and vice versa), so compare with :latest
+    # normalized on both sides.
+    rollback_user_turn
+    if ! curl -sf --max-time 5 "$OLLAMA_API/api/tags" 2>/dev/null \
+        | jq -e --arg m "$OLLAMA_MODEL" \
+            '.models[] | select((.name == $m)
+                or (.name == $m + ":latest")
+                or ((.name | sub(":latest$";"")) == $m))' >/dev/null 2>&1; then
+        error_exit "Model '$OLLAMA_MODEL' is not installed. Run: ollama pull $OLLAMA_MODEL"
+    fi
+    error_exit "Empty response from $OLLAMA_MODEL. The model may be overloaded or misconfigured."
+fi
+
+# Persist the assistant turn as JSONL using the captured text.
+jq -nc --rawfile c "$LAST_RESPONSE_FILE" '{role:"assistant",content:$c}' >> "$MESSAGES_FILE"

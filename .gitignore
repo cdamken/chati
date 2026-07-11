@@ -1,0 +1,62 @@
+# Sensitive authentication files
+.bearer.txt
+bearer_token
+.active_ollama_model.txt
+
+# Per-machine config (SearXNG endpoint + credentials). Template is
+# .env.example (committed); the real .env is personal and never committed.
+.env
+
+# Configuration files with sensitive data
+*_config.conf
+*.conf
+
+# Message history and conversation state files
+*/messages/*
+*_conversation_state
+nls_conversation_state
+.messages.active.ola.txt
+.ola_messages.txt
+.ola_previous.txt
+.ola_back.txt
+.ola_settings.txt
+.system_prompt.txt
+.chati_history
+# Per-instance active-state dirs (CHATI_INSTANCE=…)
+ola_chat/instances/
+
+# Data directories (Exclude content but keep folder if needed via README)
+conversation_histories/*
+test_data/
+archive/
+
+# Temporary and cache files
+*.tmp
+*.cache
+.DS_Store
+.web_cache/
+.last_response.txt
+
+# Backup directories
+config_backups_*/
+
+# Log files
+*.log
+
+# Test outputs
+*/OCR_OUTPUTS/*
+test_output.txt
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+__pycache__/
+
+# Personal / unrelated reports — do not commit
+backup_inventory_*.md
+portfolio_*.md
+existing_ids.txt
+parse_gbm*.py

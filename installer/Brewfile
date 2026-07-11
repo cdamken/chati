@@ -1,0 +1,22 @@
+# Homebrew Dependencies for Chat System
+# Use 'brew bundle' to install
+#
+# No `tap` lines: homebrew/core is implicit, and homebrew/bundle is built
+# into brew (>=4.x) — tapping either now ERRORS and aborts `brew bundle`.
+
+# Core utilities
+brew "curl"
+brew "jq"
+brew "lynx"
+brew "groovy"
+brew "uv"
+brew "python@3.11"
+
+# AI & LLM
+brew "ollama"
+
+# OCR & Document Processing
+brew "tesseract"
+brew "tesseract-lang"
+brew "imagemagick"
+brew "ghostscript"

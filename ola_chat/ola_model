@@ -1,0 +1,108 @@
+#!/bin/bash
+#==============================================================================
+# OLA_MODEL - Manage Ollama models for ola chat
+#==============================================================================
+set -o pipefail
+# Resolve lib_chat.sh relative to this script so we work from a sandbox too.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib_chat.sh"
+
+OLA_MODEL_VERSION="1.1.0"
+
+# error_exit comes from lib_chat.sh.
+
+show_help() {
+    cat << EOF
+Usage: $(basename "$0") <command> [arguments]
+
+Commands:
+    list                    List all available models with status
+    current                 Show current active model
+    set <model|number>      Set active model (by name or number)
+    rm <model>             Remove a model
+    pull <model>           Pull a model from registry
+    ps                     Show running models
+    help                   Show this help message
+EOF
+}
+
+check_ollama() {
+    if ! ollama list >/dev/null 2>&1; then
+        error_exit "Ollama is not running. Start it with: ailocal startollama"
+    fi
+}
+
+list_models() {
+    check_ollama
+    echo "Available models:"
+    echo "----------------"
+    # Space-padded list so we can match whole tokens with substring search
+    # without prefix collisions (e.g. llama3.2 vs llama3.2:1b).
+    local running_models
+    running_models=" $(ollama ps 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ' ')"
+    local active=""
+    [[ -s "$ACTIVE_MODEL_FILE" ]] && active=$(cat "$ACTIVE_MODEL_FILE" 2>/dev/null)
+    local num=1
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local model size status padded_num
+        model=$(echo "$line" | awk '{print $1}')
+        size=$(echo "$line" | awk '{print $3" "$4}')
+        printf -v padded_num "%2d." "$num"
+        status="(ready)"
+        # Exact-token match: surround both sides with spaces.
+        if [[ "$running_models" == *" $model "* ]]; then status="(running)"; fi
+        if [[ -n "$active" && "$model" == "$active" ]]; then status="(selected)"; fi
+        printf "%-4s %-25s %-10s %s\n" "$padded_num" "$model" "$size" "$status"
+        ((num++))
+    done < <(ollama list | tail -n +2)
+}
+
+set_model() {
+    local model="$1"
+    if ! ollama list | awk '{print $1}' | tail -n +2 | grep -qxF "$model"; then
+        echo "Model '$model' not found. Pull it first."
+        exit 1
+    fi
+    echo "$model" > "$ACTIVE_MODEL_FILE"
+    echo "Active model set to: $model"
+}
+
+show_current() {
+    if [ -f "$ACTIVE_MODEL_FILE" ]; then
+        local current_model=$(cat "$ACTIVE_MODEL_FILE")
+        echo "Current active model: $current_model"
+    else
+        echo "No active model set."
+    fi
+}
+
+case "$1" in
+    -h|--help|help) show_help ;;
+    -v|--version)   echo "ola_model $OLA_MODEL_VERSION"; exit 0 ;;
+    list) list_models ;;
+    current) show_current ;;
+    set)
+        if [ -z "$2" ]; then error_exit "Model required."; fi
+        if [[ "$2" =~ ^[0-9]+$ ]]; then
+            model=$(ollama list | tail -n +2 | sed -n "${2}p" | awk '{print $1}')
+            [[ -z "$model" ]] && error_exit "Invalid number."
+            set_model "$model"
+        else
+            set_model "$2"
+        fi
+        ;;
+    rm)
+        if [ -z "$2" ]; then error_exit "Model name required."; fi
+        ollama rm "$2"
+        ;;
+    pull)
+        if [ -z "$2" ]; then error_exit "Model name required."; fi
+        ollama pull "$2"
+        ;;
+    ps)
+        ollama ps
+        ;;
+    *)
+        show_help
+        ;;
+esac

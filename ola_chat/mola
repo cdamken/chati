@@ -1,0 +1,455 @@
+#!/bin/bash
+#==============================================================================
+# MOLA - Session & Memory Manager
+#==============================================================================
+set -o pipefail
+# Resolve lib_chat.sh relative to this script so we work from a sandbox too.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib_chat.sh"
+
+MOLA_VERSION="2.1.0"
+
+mkdir -p "$HISTORY_DIR"
+
+# error_exit comes from lib_chat.sh.
+
+# --- Helpers ---
+
+# Print all session files (most recent first), one per line, with no
+# companion files (_summary, _prompt, _compressed_at) and no lock dirs.
+# Uses globs instead of `ls | grep` so unusual filenames are safe.
+list_session_files() {
+    local f
+    local -a files=()
+    for f in "$HISTORY_DIR"/*; do
+        [[ -f "$f" ]] || continue
+        case "$f" in
+            *_summary|*_prompt|*_compressed_at|*.lock) continue ;;
+        esac
+        files+=("$f")
+    done
+    [[ ${#files[@]} -eq 0 ]] && return 0
+    # Sort by mtime (newest first) via stat
+    printf '%s\n' "${files[@]}" \
+        | xargs -I{} stat -f '%m %N' {} 2>/dev/null \
+        | sort -rn \
+        | awk '{$1=""; sub(/^ /,""); print}' \
+        | while IFS= read -r path; do basename "$path"; done
+}
+
+# Get the filename of a session by its time-sorted index (1-based)
+get_session_by_index() {
+    local idx="$1"
+    local name
+    name=$(list_session_files | sed -n "${idx}p")
+    if [[ -n "$name" && -f "$HISTORY_DIR/$name" ]]; then
+        echo "$name"
+        return 0
+    fi
+    return 1
+}
+
+generate_random_name() {
+    local adjectives=("brilliant" "creative" "dynamic" "elegant" "focused" "inspired" "logical" "mindful" "novel" "precise" "quick" "radiant" "smart" "thoughtful" "unique" "vibrant" "wise" "zealous")
+    local nouns=("idea" "concept" "project" "solution" "analysis" "research" "discovery" "insight" "theory" "discussion" "exploration" "innovation" "strategy" "framework" "breakthrough" "synthesis" "approach" "methodology")
+    local adj=${adjectives[$((RANDOM % ${#adjectives[@]}))]}
+    local noun=${nouns[$((RANDOM % ${#nouns[@]}))]}
+    echo "${adj}_${noun}_gen"
+}
+
+# Sanitize a user-supplied session name: only [a-z0-9_-] allowed; collapse
+# anything else to "_" and reject paths-traversal characters outright.
+sanitize_session_name() {
+    local name="$1"
+    case "$name" in
+        */*|*..*) error_exit "Session name may not contain '/' or '..'." ;;
+    esac
+    name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | sed 's/[^a-z0-9_-]/_/g')
+    name="${name##_}"
+    name="${name%%_}"
+    echo "$name"
+}
+
+# --- Actions ---
+
+list_conversations() {
+    echo "Available Sessions:"
+    echo "-------------------"
+    local current_name
+    current_name=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    local i=1
+    list_session_files | while IFS= read -r name; do
+        [[ -f "$HISTORY_DIR/$name" ]] || continue
+        local msg_count
+        msg_count=$(session_msg_count "$HISTORY_DIR/$name")
+        local status=""
+        [[ -f "$HISTORY_DIR/${name}_summary" ]] && status="[Compressed]"
+
+        if [[ "$name" == "$current_name" ]]; then
+            printf "%2d. → %-35s (%s msgs) [ACTIVE] %s\n" "$i" "$name" "$msg_count" "$status"
+        else
+            printf "%2d.   %-35s (%s msgs) %s\n" "$i" "$name" "$msg_count" "$status"
+        fi
+        ((i++))
+    done
+}
+
+new_conversation() {
+    local raw="$1"
+    local base_name=""
+    if [[ -n "$raw" ]]; then
+        base_name=$(sanitize_session_name "$raw")
+        [[ -z "$base_name" ]] && error_exit "Session name is empty after sanitization."
+    else
+        base_name=$(generate_random_name)
+    fi
+
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M)
+    local name="${timestamp}_${base_name}"
+
+    # Save current active before switching, and remember it as the "back" target.
+    if [[ -s "$ACTIVE_FILE" ]]; then
+        local current_sess
+        current_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+        if [[ -n "$current_sess" ]]; then
+            cp "$ACTIVE_FILE" "$HISTORY_DIR/$current_sess"
+            echo "$current_sess" > "$BACK_FILE"
+        fi
+    fi
+
+    local new_file="$HISTORY_DIR/$name"
+    : > "$new_file"
+    cp "$new_file" "$ACTIVE_FILE"
+    echo "$name" > "$PREVIOUS_FILE"
+
+    [[ -f "$DEFAULT_SYSTEM_PROMPT" ]] && cp "$DEFAULT_SYSTEM_PROMPT" "$HISTORY_DIR/${name}_prompt"
+
+    echo "✨ Started new session: $name"
+}
+
+switch_conversation() {
+    local input="$1"
+    local target_name=""
+    if [[ "$input" =~ ^[0-9]+$ ]]; then
+        target_name=$(get_session_by_index "$input")
+    else
+        # Sanitize like new/rename do — a raw name here reached
+        # "$HISTORY_DIR/$name" unchecked, so "../../x" escaped the dir
+        # (read an arbitrary file into the active buffer + poison
+        # PREVIOUS_FILE). sanitize_session_name rejects / and ..
+        target_name=$(sanitize_session_name "$input")
+    fi
+    [[ -z "$target_name" || ! -f "$HISTORY_DIR/$target_name" ]] && error_exit "Session index or name not found."
+
+    local current_sess
+    current_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    if [[ -n "$current_sess" && -f "$HISTORY_DIR/$current_sess" ]]; then
+        cp "$ACTIVE_FILE" "$HISTORY_DIR/$current_sess"
+        echo "$current_sess" > "$BACK_FILE"
+    fi
+
+    cp "$HISTORY_DIR/$target_name" "$ACTIVE_FILE"
+    echo "$target_name" > "$PREVIOUS_FILE"
+    echo "🔄 Switched to: $target_name"
+}
+
+back_conversation() {
+    local target
+    target=$(cat "$BACK_FILE" 2>/dev/null)
+    [[ -z "$target" ]] && error_exit "No previous session to go back to."
+    [[ ! -f "$HISTORY_DIR/$target" ]] && error_exit "Previous session '$target' no longer exists."
+    switch_conversation "$target"
+}
+
+autorename_conversation() {
+    local target_name=""
+    local target_file=""
+    local is_active=false
+    local index_arg=""
+
+    local by_name=""
+    if [[ "$1" == "all" ]]; then
+        autorename_all false
+        return 0
+    elif [[ "$1" == "all-force" ]]; then
+        autorename_all true
+        return 0
+    elif [[ "$1" == "--sess" ]]; then
+        # Address a session by its stable NAME (used by autorename_all).
+        by_name="$2"
+        target_name="$by_name"
+        target_file="$HISTORY_DIR/$by_name"
+        [[ ! -f "$target_file" ]] && { echo "⚠️  Session '$by_name' gone."; return 1; }
+        [[ "$target_name" == "$(cat "$PREVIOUS_FILE" 2>/dev/null)" ]] && is_active=true
+    elif [[ "$1" =~ ^[0-9]+$ ]]; then
+        index_arg="$1"
+        target_name=$(get_session_by_index "$index_arg")
+        [[ -z "$target_name" ]] && error_exit "Session index $index_arg not found."
+        target_file="$HISTORY_DIR/$target_name"
+        [[ "$target_name" == "$(cat "$PREVIOUS_FILE" 2>/dev/null)" ]] && is_active=true
+    else
+        target_name=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+        [[ -z "$target_name" ]] && error_exit "No active session."
+        target_file="$ACTIVE_FILE"
+        is_active=true
+    fi
+
+    [[ ! -s "$target_file" ]] && { echo "⚠️  Session empty."; return 1; }
+
+    echo -n "🧠 Analyzing context for '$target_name'... "
+    local sample
+    sample=$(tail -c "${MAX_COMPRESS_CHARS:-10000}" "$target_file")
+    local model
+    model=$(active_model)
+
+    local prompt="Task: Create a 3-5 word title for this conversation.
+- Focus on the ACTUAL TOPIC (e.g. 'stocks_market_trend_analysis', 'medical_report_summary').
+- If there are stocks, ISINs or tickers, include 'stock_analysis'.
+- Use underscores. NO dates. Response ONLY with the title.
+Content: $sample"
+
+    local ai_name
+    ai_name=$(ollama_chat_oneshot "$model" "$prompt" \
+        | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | sed 's/[^a-z0-9_]//g' | cut -c1-60)
+
+    if [[ -n "$ai_name" ]]; then
+        echo "Done."
+        # Plain if/else: `cmd1 && X || Y` would run Y if X itself failed,
+        # which is wrong here — all branches are real rename calls.
+        if [[ -n "$by_name" ]]; then
+            rename_conversation --sess "$by_name" "$ai_name"
+        elif [[ "$is_active" == "true" ]]; then
+            rename_conversation "$ai_name"
+        else
+            rename_conversation "$index_arg" "$ai_name"
+        fi
+    else
+        echo "Failed."
+        log_chat "autorename: empty response for '$target_name'"
+    fi
+}
+
+autorename_all() {
+    local force_all="$1"
+    echo "🧹 Cleaning and renaming sessions (Force: $force_all)..."
+
+    # Capture the session NAMES up front and address each by name. The old
+    # code passed a live loop index into autorename_conversation, but this
+    # loop DELETES empty sessions as it goes — every deletion shifted the
+    # index list, so later renames hit the wrong session and the tail ran
+    # off the end (index out of range → exit 1, aborting the whole run).
+    local -a files=()
+    while IFS= read -r name; do files+=("$name"); done < <(list_session_files)
+
+    local active_sess
+    active_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+
+    for name in "${files[@]}"; do
+        local file_path="$HISTORY_DIR/$name"
+        [[ -f "$file_path" ]] || continue
+
+        local msg_count
+        msg_count=$(session_msg_count "$file_path")
+
+        if [[ $msg_count -eq 0 ]]; then
+            if [[ "$name" != "$active_sess" ]]; then
+                echo "🗑️  Removing empty session: $name"
+                remove_session_files "$file_path"
+            fi
+            continue
+        fi
+
+        local should_rename=false
+        if [ "$force_all" = true ]; then
+            should_rename=true
+        else
+            if [[ "$name" =~ _gen$ ]] || [[ "$name" =~ ^session_ ]] || [[ "$name" =~ ^[0-9]{8}_[0-9]{4}$ ]]; then
+                should_rename=true
+            fi
+        fi
+
+        # Address by stable NAME, immune to the deletions above.
+        [ "$should_rename" = true ] && autorename_conversation --sess "$name"
+    done
+    echo "✅ Cleanup and autorename complete."
+}
+
+rename_conversation() {
+    local target_sess=""
+    local new_name=""
+
+    if [[ "$1" == "--sess" ]]; then
+        # Address a session by its stable NAME, not a live index — needed
+        # by autorename_all, whose indices shift as it deletes empties.
+        target_sess="$2"
+        new_name="$3"
+    elif [[ "$1" =~ ^[0-9]+$ && -n "$2" ]]; then
+        target_sess=$(get_session_by_index "$1")
+        new_name="$2"
+    else
+        target_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+        new_name="$1"
+    fi
+
+    [[ -z "$target_sess" ]] && error_exit "Session not found."
+    [[ -z "$new_name" ]] && error_exit "Usage: mola rename [index] <new_name>"
+
+    new_name=$(echo "$new_name" | sed -E 's/^[0-9]{8}_[0-9]{4,6}_//')
+    new_name=$(sanitize_session_name "$new_name")
+    [[ -z "$new_name" ]] && error_exit "New name is empty after sanitization."
+
+    local timestamp
+    timestamp=$(echo "$target_sess" | grep -oE "[0-9]{8}_[0-9]{4}" | head -1)
+    if [[ -z "$timestamp" ]]; then
+        timestamp=$(stat -f %Sm -t %Y%m%d_%H%M "$HISTORY_DIR/$target_sess" 2>/dev/null)
+    fi
+    [[ -z "$timestamp" ]] && timestamp=$(date +%Y%m%d_%H%M)
+
+    local final_name="${timestamp}_${new_name}"
+
+    if [[ "$target_sess" != "$final_name" ]]; then
+        move_session_files "$HISTORY_DIR/$target_sess" "$HISTORY_DIR/$final_name"
+
+        [[ "$target_sess" == "$(cat "$PREVIOUS_FILE")" ]] && echo "$final_name" > "$PREVIOUS_FILE"
+        [[ -f "$BACK_FILE" && "$(cat "$BACK_FILE")" == "$target_sess" ]] && echo "$final_name" > "$BACK_FILE"
+        echo "🏷️  Renamed to: $final_name"
+    fi
+}
+
+compress_memory() {
+    local sess_name
+    sess_name=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    [[ -z "$sess_name" ]] && return 0
+
+    # Best-effort lock so two background jobs don't clobber the same summary.
+    local lock="$HISTORY_DIR/${sess_name}_summary.lock"
+    if ! mkdir "$lock" 2>/dev/null; then
+        log_chat "compress: skipping '$sess_name' (lock held)"
+        return 0
+    fi
+    trap 'rmdir "$lock" 2>/dev/null' RETURN
+
+    echo -n "🌀 Compacting memory for '$sess_name'... "
+    local model
+    model=$(active_model)
+
+    # Fold-forward: feed the PREVIOUS summary back in so early facts
+    # (ISINs, decisions from the start of a long chat) survive. The old
+    # version summarized only the last ~10KB and OVERWROTE the summary,
+    # so after ~2 cycles the earliest facts silently vanished — exactly
+    # what the memory was supposed to preserve.
+    local prev_summary=""
+    [[ -s "$HISTORY_DIR/${sess_name}_summary" ]] && prev_summary=$(cat "$HISTORY_DIR/${sess_name}_summary")
+
+    local prompt="You maintain a RUNNING SUMMARY of a long conversation. Produce an updated summary that MERGES the previous summary with the recent conversation below.
+Requirements:
+- PRESERVE every unique identifier (ISINs, tickers, names) and decision already in the previous summary — do NOT drop earlier facts just because they aren't in the recent window.
+- Add anything new from the recent conversation. Be dense and technical.
+- Format as bullet points. Respond ONLY with the summary.
+
+=== PREVIOUS SUMMARY (carry all of this forward) ===
+${prev_summary:-(none yet)}
+
+=== RECENT CONVERSATION ===
+$(tail -c "${MAX_COMPRESS_CHARS:-10000}" "$ACTIVE_FILE")"
+
+    local summary
+    summary=$(ollama_chat_oneshot "$model" "$prompt")
+
+    if [[ -n "$summary" ]]; then
+        # Atomic write so a partial summary is never observed.
+        local tmp="$HISTORY_DIR/${sess_name}_summary.tmp"
+        printf '%s\n' "$summary" > "$tmp"
+        mv "$tmp" "$HISTORY_DIR/${sess_name}_summary"
+        echo "Done."
+    else
+        echo "Failed."
+        log_chat "compress: empty response for '$sess_name'"
+    fi
+}
+
+# Persist the active buffer back to its session file. No-op (with a log
+# line) when no session is active — without the guard, an empty
+# $PREVIOUS_FILE turned the destination into "$HISTORY_DIR/" and cp
+# failed with "is a directory".
+save_active() {
+    local sess
+    sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    if [[ -z "$sess" ]]; then
+        log_chat "save: no active session, skipping"
+        return 0
+    fi
+    cp "$ACTIVE_FILE" "$HISTORY_DIR/$sess"
+}
+
+delete_session() {
+    local input="$1"
+    [[ -z "$input" ]] && error_exit "Usage: mola delete <index|name>"
+    local target_name=""
+    if [[ "$input" =~ ^[0-9]+$ ]]; then
+        target_name=$(get_session_by_index "$input")
+    else
+        # Sanitize — a raw "../../x" here would delete an arbitrary file
+        # (and its companions) after the y/N confirm. Rejects / and ..
+        target_name=$(sanitize_session_name "$input")
+    fi
+    [[ -z "$target_name" || ! -f "$HISTORY_DIR/$target_name" ]] && error_exit "Session not found."
+
+    local active_sess
+    active_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    if [[ "$target_name" == "$active_sess" ]]; then
+        echo "❌ Cannot delete the active session. Switch first."
+        return 1
+    fi
+
+    read -rp "🗑️  Delete session '$target_name'? [y/N] " -n 1
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        remove_session_files "$HISTORY_DIR/$target_name"
+        if [[ -f "$BACK_FILE" && "$(cat "$BACK_FILE")" == "$target_name" ]]; then
+            : > "$BACK_FILE"
+        fi
+        echo "✅ Session and companions deleted."
+    else
+        echo "🚫 Deletion cancelled."
+    fi
+}
+
+show_help() {
+    cat << EOF
+Usage: mola <subcommand> [args]
+
+Subcommands:
+  list (ls)               List all sessions with message counts.
+  new [name]              Start a new session.
+  switch <idx|name>       Switch to a session by index or name.
+  back                    Toggle to the previously-active session.
+  rename [idx] <name>     Rename a session (or the active one if no idx).
+  autorename [idx|all]    Use the LLM to derive a descriptive title.
+  delete <idx|name>       Delete a session and its companion files.
+  compress                Generate/refresh the LLM summary of the active session.
+  save                    Persist the active buffer to its session file.
+  --help, -h              Show this help.
+  --version, -v           Show mola version.
+
+Companion files per session live next to the conversation file:
+  \${name}_prompt          System prompt for that session.
+  \${name}_summary         LLM-generated summary (compressed memory).
+  \${name}_compressed_at   Marker used by chati's maybe_compress.
+EOF
+}
+
+case "$1" in
+    list|ls)        list_conversations ;;
+    new)            new_conversation "$2" ;;
+    switch)         switch_conversation "$2" ;;
+    back)           back_conversation ;;
+    rename)         rename_conversation "$2" "$3" ;;
+    autorename)     autorename_conversation "$2" ;;
+    delete)         delete_session "$2" ;;
+    compress)       compress_memory ;;
+    save)           save_active ;;
+    -h|--help|help) show_help ;;
+    -v|--version)   echo "mola $MOLA_VERSION" ;;
+    *)              show_help; exit 1 ;;
+esac

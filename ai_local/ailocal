@@ -1,0 +1,602 @@
+#!/bin/bash
+# ailocal - Unified local AI service manager and upgrader
+# Author: Carlos Damken
+set -o pipefail
+
+AILOCAL_VERSION="3.0.0"
+
+# === GLOBAL CONFIGURATION ===
+LOG_DIR="$HOME/logs"
+LOG_FILE="$LOG_DIR/ailocal.log"
+UPGRADE_LOG="$LOG_DIR/ailocal_upgrade.log"
+OPENWEBUI_DIR="$HOME/openwebui"
+OPENWEBUI_DATA_DIR="$OPENWEBUI_DIR/data"
+OPENWEBUI_VENV="$OPENWEBUI_DIR/.venv"
+# Match the OpenWebUI process by its full venv binary path, not the bare
+# "open-webui serve" substring — otherwise pkill -f could hit an unrelated
+# process (an editor, a grep) whose command line happens to contain that
+# text. This is the exact path we launch in startwebui.
+WEBUI_PROC="$OPENWEBUI_VENV/bin/open-webui serve"
+# Match "ollama serve" only when "ollama" starts at a word boundary (line
+# start, after a slash in a path, or after a space) — so a stray process
+# like "myollama serve" isn't caught. Still matches both `ollama serve`
+# and `/opt/homebrew/bin/ollama serve`. (ERE — pgrep/pkill -f.)
+OLLAMA_PROC='(^|[/ ])ollama serve'
+
+# --- Local SearXNG (optional 2nd web-search endpoint) ---
+# A local SearXNG on a different IP than your cloud one → round-robin in
+# chati's /web multiplies the rate-limit budget. Native install (no
+# Docker): git clone + venv (Python 3.12) + granian, all under ~/searxng.
+SEARXNG_DIR="$HOME/searxng"
+SEARXNG_SRC="$SEARXNG_DIR/src"
+SEARXNG_VENV="$SEARXNG_DIR/.venv"
+SEARXNG_SETTINGS="$SEARXNG_DIR/settings.yml"
+SEARXNG_LOCAL_HOST="${SEARXNG_LOCAL_HOST:-127.0.0.1}"
+SEARXNG_LOCAL_PORT="${SEARXNG_LOCAL_PORT:-8890}"
+SEARXNG_PROC='granian.*searx\.webapp'
+
+# ONE backup slot: the state before the last upgrade/backup. The
+# philosophy is deliberate — if an upgrade breaks, you `ailocal restore`
+# to the previous state; the next upgrade replaces the snapshot. No
+# backup zoo to curate.
+BACKUP_SLOT="$HOME/openwebui_backups/previous"
+
+WEBUI_PORT="${WEBUI_PORT:-8888}"
+WEBUI_HOST="${WEBUI_HOST:-127.0.0.1}"
+OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
+# First boot after an upgrade runs DB migrations — 60s produced false
+# TIMEOUTs while the server came up fine seconds later.
+WEBUI_START_TIMEOUT="${WEBUI_START_TIMEOUT:-180}"
+
+# Secret key lives in a file OUTSIDE the repo (never hardcode secrets —
+# anything committed once lives in git history forever).
+WEBUI_SECRET_KEY_FILE="$OPENWEBUI_DIR/.webui_secret_key"
+
+mkdir -p "$LOG_DIR"
+
+# === UTILITY FUNCTIONS ===
+
+# Human-facing progress goes to STDERR + logfile; stdout stays clean so
+# callers can capture function results with $(...).
+log() {
+    echo "$1" >&2
+    echo "$(date): $1" >> "$LOG_FILE"
+}
+
+error_exit() {
+    echo "Error: $1" >&2
+    echo "$(date): Error: $1" >> "$LOG_FILE"
+    [[ -n "$2" ]] && echo "Details: $2" >&2
+    exit 1
+}
+
+check_dependencies() {
+    local deps=("uv" "curl" "jq" "ollama")
+    local missing=()
+    local dep
+    for dep in "${deps[@]}"; do
+        command -v "$dep" >/dev/null 2>&1 || missing+=("$dep")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        error_exit "Missing required dependencies: ${missing[*]}" "Please install them via Homebrew."
+    fi
+}
+
+check_webui_status() {
+    curl -s --max-time 3 "http://$WEBUI_HOST:$WEBUI_PORT/health" >/dev/null 2>&1
+}
+
+# Load the secret key from its file, generating one if needed.
+load_secret_key() {
+    if [[ ! -s "$WEBUI_SECRET_KEY_FILE" ]]; then
+        log "Generating new WEBUI secret key at $WEBUI_SECRET_KEY_FILE (existing sessions will need to log in again)."
+        mkdir -p "$OPENWEBUI_DIR"
+        ( umask 077; openssl rand -hex 32 > "$WEBUI_SECRET_KEY_FILE" ) \
+            || error_exit "Could not generate secret key (is openssl available?)"
+    fi
+    WEBUI_SECRET_KEY=$(cat "$WEBUI_SECRET_KEY_FILE")
+}
+
+# Locate the LIVE OpenWebUI database. With DATA_DIR exported it lives in
+# the external data dir; the venv fallback covers installs from before
+# that fix (and any future regression).
+find_webui_db() {
+    if [[ -f "$OPENWEBUI_DATA_DIR/webui.db" ]]; then
+        echo "$OPENWEBUI_DATA_DIR/webui.db"
+        return 0
+    fi
+    find "$OPENWEBUI_VENV" -name "webui.db" -path "*open_webui/data*" 2>/dev/null | head -n 1
+}
+
+# Installed open-webui version (empty if not installed).
+webui_installed_version() {
+    "$OPENWEBUI_VENV/bin/python3" -c \
+        'import importlib.metadata as m; print(m.version("open-webui"))' 2>/dev/null
+}
+
+# === SERVICE MANAGEMENT ===
+
+status() {
+    local ollama_state="STOPPED" webui_state="STOPPED"
+    local ollama_ver="" webui_ver=""
+    if pgrep -f "$OLLAMA_PROC" > /dev/null; then
+        ollama_state="RUNNING"
+        ollama_ver=$(curl -s --max-time 2 "$OLLAMA_BASE_URL/api/version" 2>/dev/null | jq -r '.version // empty')
+        [[ -n "$ollama_ver" ]] && ollama_ver=" (v$ollama_ver)"
+    fi
+    if pgrep -f "$WEBUI_PROC" > /dev/null; then
+        webui_state="RUNNING"
+        webui_ver=$(webui_installed_version)
+        [[ -n "$webui_ver" ]] && webui_ver=" (v$webui_ver)"
+    fi
+    echo "Ollama:    $ollama_state$ollama_ver"
+    echo "OpenWebUI: $webui_state$webui_ver"
+    # SearXNG line only when the local instance is installed.
+    if searxng_installed; then
+        if pgrep -f "$SEARXNG_PROC" > /dev/null; then
+            echo "SearXNG:   RUNNING (http://$SEARXNG_LOCAL_HOST:$SEARXNG_LOCAL_PORT)"
+        else
+            echo "SearXNG:   STOPPED"
+        fi
+    fi
+    if [[ -f "$BACKUP_SLOT/BACKUP_INFO.txt" ]]; then
+        echo "Backup:    $(head -1 "$BACKUP_SLOT/BACKUP_INFO.txt") ($(du -sh "$BACKUP_SLOT" 2>/dev/null | cut -f1))"
+    else
+        echo "Backup:    none — run 'ailocal backup'"
+    fi
+}
+
+startwebui() {
+    if pgrep -f "$WEBUI_PROC" > /dev/null; then
+        echo "OpenWebUI is already running"
+        return 0
+    fi
+
+    if ! curl -s --max-time 3 "$OLLAMA_BASE_URL/api/version" > /dev/null; then
+        echo "Warning: Ollama is not running. Starting it..."
+        startollama
+        sleep 3
+    fi
+
+    if [[ ! -x "$OPENWEBUI_VENV/bin/open-webui" ]]; then
+        error_exit "OpenWebUI environment not found at $OPENWEBUI_VENV" "Run 'ailocal upgrade webui --force' to install."
+    fi
+
+    mkdir -p "$OPENWEBUI_DATA_DIR"
+    load_secret_key
+    # DATA_DIR is the variable OpenWebUI actually reads. Without it the
+    # data lives INSIDE the venv and dies on every --force reinstall
+    # (root cause of the 2026-06-12 data-loss incident).
+    export DATA_DIR="$OPENWEBUI_DATA_DIR"
+    export WEBUI_SECRET_KEY OLLAMA_BASE_URL
+
+    # Local single-user instance: skip the login wall by default so the UI
+    # opens straight to chat. Override with WEBUI_AUTH=True if you expose the
+    # port. (OpenWebUI blocks turning auth back ON once a DB exists, so decide
+    # this before first boot.)
+    export WEBUI_AUTH="${WEBUI_AUTH:-False}"
+
+    # Wire OpenWebUI's built-in web search to the local SearXNG when it's
+    # installed, so the browser UI's search works out of the box. Both the
+    # current (WEB_SEARCH_*) and legacy (RAG_WEB_SEARCH_*) env names are set;
+    # whichever your OpenWebUI version doesn't know is simply ignored.
+    if searxng_installed; then
+        local searx_query="http://$SEARXNG_LOCAL_HOST:$SEARXNG_LOCAL_PORT/search?q=<query>"
+        export ENABLE_WEB_SEARCH="${ENABLE_WEB_SEARCH:-true}"
+        export WEB_SEARCH_ENGINE="${WEB_SEARCH_ENGINE:-searxng}"
+        export SEARXNG_QUERY_URL="${SEARXNG_QUERY_URL:-$searx_query}"
+        export ENABLE_RAG_WEB_SEARCH="${ENABLE_RAG_WEB_SEARCH:-true}"
+        export RAG_WEB_SEARCH_ENGINE="${RAG_WEB_SEARCH_ENGINE:-searxng}"
+    fi
+
+    log "Starting OpenWebUI..."
+    nohup "$OPENWEBUI_VENV/bin/open-webui" serve --host "$WEBUI_HOST" --port "$WEBUI_PORT" \
+        > "$LOG_DIR/webui.log" 2>&1 &
+
+    echo -n "Waiting for OpenWebUI to start (up to ${WEBUI_START_TIMEOUT}s)"
+    local i
+    for (( i = 0; i < WEBUI_START_TIMEOUT; i++ )); do
+        if check_webui_status; then
+            echo " [OK]"
+            echo "OpenWebUI started successfully at http://$WEBUI_HOST:$WEBUI_PORT"
+            [[ -z "$AILOCAL_NO_OPEN" ]] && command -v open >/dev/null && open "http://$WEBUI_HOST:$WEBUI_PORT"
+            return 0
+        fi
+        sleep 1
+        echo -n "."
+    done
+    echo " [TIMEOUT]"
+    log "Warning: OpenWebUI health check timed out after ${WEBUI_START_TIMEOUT}s. First boot after an upgrade can be slow (DB migration) — check $LOG_DIR/webui.log; the service may still come up."
+    return 1
+}
+
+# Stop OpenWebUI and WAIT for the process to actually die. SIGTERM
+# triggers a graceful uvicorn shutdown that can take several seconds,
+# during which SQLite may still checkpoint into webui.db — touching the
+# DB before the process is gone corrupts it.
+stopwebui() {
+    if ! pgrep -f "$WEBUI_PROC" > /dev/null; then
+        echo "OpenWebUI was not running"
+        return 0
+    fi
+    pkill -f "$WEBUI_PROC"
+    local i
+    for (( i = 0; i < 20; i++ )); do
+        if ! pgrep -f "$WEBUI_PROC" > /dev/null; then
+            echo "OpenWebUI stopped"
+            return 0
+        fi
+        sleep 1
+    done
+    log "OpenWebUI did not stop gracefully after 20s — sending SIGKILL."
+    pkill -9 -f "$WEBUI_PROC"
+    sleep 1
+    echo "OpenWebUI stopped (forced)"
+}
+
+startollama() {
+    if pgrep -f "$OLLAMA_PROC" > /dev/null; then
+        echo "Ollama is already running"
+        return 0
+    fi
+    nohup ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
+    echo "Ollama started. Logs at $LOG_DIR/ollama.log"
+}
+
+stopollama() {
+    if ! pgrep -f "$OLLAMA_PROC" > /dev/null; then
+        echo "Ollama was not running"
+        return 0
+    fi
+    pkill -f "$OLLAMA_PROC"
+    # Wait for actual death, then SIGKILL — same as stopwebui. Without
+    # this, `restart ollama` after `brew upgrade` could see the old
+    # daemon still alive (>2s to exit), report "already running", and
+    # leave the OLD binary serving → the "unknown runner engine" error.
+    local i
+    for (( i = 0; i < 15; i++ )); do
+        if ! pgrep -f "$OLLAMA_PROC" > /dev/null; then
+            echo "Ollama stopped"
+            return 0
+        fi
+        sleep 1
+    done
+    log "Ollama did not stop gracefully after 15s — sending SIGKILL."
+    pkill -9 -f "$OLLAMA_PROC"
+    sleep 1
+    echo "Ollama stopped (forced)"
+}
+
+searxng_installed() { [[ -x "$SEARXNG_VENV/bin/granian" && -f "$SEARXNG_SETTINGS" ]]; }
+
+startsearxng() {
+    searxng_installed || { echo "SearXNG local not installed (run installer/install_searxng.sh)"; return 0; }
+    if pgrep -f "$SEARXNG_PROC" > /dev/null; then
+        echo "SearXNG is already running"
+        return 0
+    fi
+    log "Starting local SearXNG on $SEARXNG_LOCAL_HOST:$SEARXNG_LOCAL_PORT..."
+    # </dev/null so the daemon doesn't inherit (and hold open) the
+    # caller's stdin; redirect out/err to the log. Detaches cleanly.
+    ( cd "$SEARXNG_SRC" && \
+      SEARXNG_SETTINGS_PATH="$SEARXNG_SETTINGS" PYTHONPATH="$SEARXNG_SRC" \
+      nohup "$SEARXNG_VENV/bin/granian" --interface wsgi \
+          --host "$SEARXNG_LOCAL_HOST" --port "$SEARXNG_LOCAL_PORT" \
+          searx.webapp:app </dev/null > "$LOG_DIR/searxng.log" 2>&1 & )
+    local i
+    for (( i = 0; i < 20; i++ )); do
+        if curl -s --max-time 2 -o /dev/null "http://$SEARXNG_LOCAL_HOST:$SEARXNG_LOCAL_PORT/healthz"; then
+            echo "SearXNG started at http://$SEARXNG_LOCAL_HOST:$SEARXNG_LOCAL_PORT"
+            return 0
+        fi
+        sleep 1
+    done
+    log "SearXNG health check timed out — see $LOG_DIR/searxng.log"
+    return 1
+}
+
+stopsearxng() {
+    if ! pgrep -f "$SEARXNG_PROC" > /dev/null; then
+        echo "SearXNG was not running"
+        return 0
+    fi
+    pkill -f "$SEARXNG_PROC"
+    local i
+    for (( i = 0; i < 15; i++ )); do
+        pgrep -f "$SEARXNG_PROC" > /dev/null || { echo "SearXNG stopped"; return 0; }
+        sleep 1
+    done
+    pkill -9 -f "$SEARXNG_PROC"; sleep 1
+    echo "SearXNG stopped (forced)"
+}
+
+start_target() {
+    case "${1:-all}" in
+        ollama)  startollama ;;
+        webui)   startwebui ;;
+        searxng) startsearxng ;;
+        # 'all' includes SearXNG only if it's installed (optional component).
+        all)     startollama; sleep 1; startwebui; searxng_installed && startsearxng ;;
+        *)       error_exit "Unknown service: $1 (expected: ollama, webui, searxng or all)" ;;
+    esac
+}
+
+stop_target() {
+    case "${1:-all}" in
+        ollama)  stopollama ;;
+        webui)   stopwebui ;;
+        searxng) stopsearxng ;;
+        all)     stopsearxng; stopwebui; stopollama ;;
+        *)       error_exit "Unknown service: $1 (expected: ollama, webui, searxng or all)" ;;
+    esac
+}
+
+# Needed in real life: after `brew upgrade ollama` the running server
+# spawns the NEW runner binary with old flags and every model load dies
+# ("unknown runner engine") until the service is bounced.
+restart_target() {
+    stop_target "${1:-all}"
+    sleep 2
+    start_target "${1:-all}"
+}
+
+# === BACKUP & RESTORE (single slot) ===
+
+# Snapshot the current OpenWebUI state into the single backup slot,
+# replacing whatever was there. Built in a temp dir and swapped in so a
+# failed backup never destroys the existing one. Refuses to "back up"
+# nothing — an empty backup is worse than a loud error.
+create_backup() {
+    local staging="$BACKUP_SLOT.staging.$$"
+    rm -rf "$staging"
+    mkdir -p "$staging/data" || error_exit "Failed to create staging directory"
+
+    # Data directory contents (uploads, vector_db, ...), if any.
+    if [[ -d "$OPENWEBUI_DATA_DIR" ]] && [[ -n "$(ls -A "$OPENWEBUI_DATA_DIR" 2>/dev/null)" ]]; then
+        cp -R "$OPENWEBUI_DATA_DIR/" "$staging/data/" 2>/dev/null
+        # The live cp of a hot WAL-mode DB can be torn; replaced below
+        # with a consistent sqlite3 snapshot.
+        rm -f "$staging/data/webui.db" "$staging/data/webui.db-wal" "$staging/data/webui.db-shm"
+    fi
+
+    local db
+    db=$(find_webui_db)
+    if [[ -z "$db" ]]; then
+        rm -rf "$staging"
+        error_exit "No webui.db found in $OPENWEBUI_DATA_DIR or $OPENWEBUI_VENV — refusing to create an empty backup."
+    fi
+    log "Backing up database: $db"
+    if command -v sqlite3 >/dev/null 2>&1; then
+        sqlite3 "$db" ".backup '$staging/data/webui.db'" \
+            || { rm -rf "$staging"; error_exit "sqlite3 .backup failed for $db"; }
+    else
+        cp "$db" "$staging/data/webui.db" \
+            || { rm -rf "$staging"; error_exit "cp failed for $db"; }
+    fi
+
+    [[ -f "$WEBUI_SECRET_KEY_FILE" ]] && cp "$WEBUI_SECRET_KEY_FILE" "$staging/" 2>/dev/null
+
+    {
+        echo "previous state from $(date '+%Y-%m-%d %H:%M')"
+        echo "OpenWebUI version: $(webui_installed_version || echo unknown)"
+        echo "Database source: $db"
+    } > "$staging/BACKUP_INFO.txt"
+
+    # Swap: only now does the old snapshot go away.
+    mkdir -p "$(dirname "$BACKUP_SLOT")"
+    rm -rf "$BACKUP_SLOT"
+    mv "$staging" "$BACKUP_SLOT"
+    log "Backup saved: $BACKUP_SLOT ($(du -sh "$BACKUP_SLOT" 2>/dev/null | cut -f1))"
+}
+
+# Restore the single backup slot. Confirms unless --yes. Stops the
+# service (waiting for real death), puts the data back, and starts it
+# again.
+restore_backup() {
+    local assume_yes="$1"
+    if [[ ! -f "$BACKUP_SLOT/data/webui.db" ]]; then
+        error_exit "No backup to restore (slot: $BACKUP_SLOT)" "Run 'ailocal backup' to create one."
+    fi
+
+    echo "Backup slot: $(head -1 "$BACKUP_SLOT/BACKUP_INFO.txt" 2>/dev/null || echo unknown)" >&2
+
+    # Validate the backup is a healthy, NON-EMPTY SQLite file BEFORE
+    # touching the live DB. With a single slot, restoring a corrupt or
+    # empty backup over the live copy would lose everything — verify
+    # first, abort if bad. (Skip only if sqlite3 isn't installed.)
+    # Two checks are needed: PRAGMA integrity_check catches corruption,
+    # but a 0-byte file reports "ok" (SQLite treats empty as a valid
+    # empty DB) — so also require a real schema (>=1 table).
+    if command -v sqlite3 >/dev/null 2>&1; then
+        local check tables
+        check=$(sqlite3 "$BACKUP_SLOT/data/webui.db" "PRAGMA integrity_check;" 2>&1 | head -1)
+        if [[ "$check" != "ok" ]]; then
+            error_exit "Backup database failed integrity check (\"$check\")." \
+                "Refusing to restore over your live data. The live DB is untouched."
+        fi
+        tables=$(sqlite3 "$BACKUP_SLOT/data/webui.db" \
+            "SELECT count(*) FROM sqlite_master WHERE type='table';" 2>/dev/null)
+        if [[ -z "$tables" || "$tables" -lt 1 ]]; then
+            error_exit "Backup database is empty (no tables) — refusing to restore over your live data." \
+                "The live DB is untouched."
+        fi
+    fi
+
+    if [[ "$assume_yes" != "--yes" ]]; then
+        echo "WARNING: This will overwrite your current OpenWebUI data!"
+        echo -n "Continue? (y/N): "
+        read -r confirm
+        [[ ! "$confirm" =~ ^[Yy]$ ]] && return 1
+    fi
+
+    stopwebui
+
+    log "Restoring previous state..."
+    mkdir -p "$OPENWEBUI_DATA_DIR"
+
+    # Keep a recovery copy of the current live DB OUTSIDE the data dir,
+    # so the clean-replace below can't touch it. (DATA_DIR is exported so
+    # OpenWebUI reads from $OPENWEBUI_DATA_DIR/webui.db.)
+    local live_db="$OPENWEBUI_DATA_DIR/webui.db"
+    local pre_restore="$OPENWEBUI_DIR/webui.db.pre-restore"
+    [[ -f "$live_db" ]] && cp "$live_db" "$pre_restore" 2>/dev/null
+
+    # Faithful restore: REPLACE the data dir contents, don't merge into
+    # them. A plain `cp -R` left orphan files from the old state behind
+    # (uploads/vector_db that the backup didn't have), so the restored
+    # state wasn't what was backed up. Wipe then copy the whole snapshot
+    # (includes webui.db — already integrity-checked above).
+    rm -rf "$OPENWEBUI_DATA_DIR"
+    mkdir -p "$OPENWEBUI_DATA_DIR"
+    cp -R "$BACKUP_SLOT/data/." "$OPENWEBUI_DATA_DIR/" \
+        || error_exit "Failed to restore data into $OPENWEBUI_DATA_DIR"
+    log "Restored $BACKUP_SLOT/data → $OPENWEBUI_DATA_DIR (previous live DB kept at $pre_restore)"
+
+    [[ -f "$BACKUP_SLOT/.webui_secret_key" ]] && cp "$BACKUP_SLOT/.webui_secret_key" "$WEBUI_SECRET_KEY_FILE"
+
+    log "Restore completed. Starting OpenWebUI..."
+    startwebui
+}
+
+# === UPGRADE LOGIC ===
+
+upgrade_ollama() {
+    check_dependencies
+    log "Upgrading Ollama Application via Homebrew..."
+    brew upgrade ollama >> "$UPGRADE_LOG" 2>&1 || log "Ollama app already up to date"
+    # A server that predates the new binary spawns the new runner with
+    # old flags and every model load dies — always bounce.
+    restart_target ollama
+
+    log "Upgrading Ollama Models..."
+    ollama list | tail -n +2 | awk '{print $1}' | while read -r model; do
+        printf "Upgrading %s..." "$model"
+        ollama pull "$model" >> "$UPGRADE_LOG" 2>&1 && echo " Done" || echo " Failed"
+    done
+}
+
+upgrade_webui() {
+    check_dependencies
+    local force="$1"
+
+    local before
+    before=$(webui_installed_version)
+
+    # ALWAYS snapshot before touching anything. This replaces the old
+    # separate "safe-upgrade" command: every upgrade is backed up, and
+    # if the result is broken you run `ailocal restore`.
+    if [[ -n "$(find_webui_db)" ]]; then
+        create_backup
+    fi
+
+    log "Starting OpenWebUI upgrade (installed: ${before:-none}, force: ${force:---no})..."
+    mkdir -p "$OPENWEBUI_DIR"
+
+    if [[ "$force" == "--force" ]]; then
+        stopwebui
+        rm -rf "$OPENWEBUI_VENV" "$OPENWEBUI_DIR/pyproject.toml" "$OPENWEBUI_DIR/requirements.txt"
+    fi
+
+    # All project work in a subshell so the caller's cwd never changes.
+    (
+        cd "$OPENWEBUI_DIR" || exit 1
+        if [[ ! -f pyproject.toml ]]; then
+            uv init --python=3.11 . >> "$UPGRADE_LOG" 2>&1 || exit 2
+        fi
+        if [[ ! -d "$OPENWEBUI_VENV" ]]; then
+            uv venv >> "$UPGRADE_LOG" 2>&1 || exit 3
+        fi
+        install_cmd=("uv" "pip" "install" "--python" "$OPENWEBUI_VENV/bin/python3")
+        [[ "$force" == "--force" ]] && install_cmd+=("--force-reinstall")
+        # --refresh bypasses uv's cache so "latest" really means latest.
+        install_cmd+=("--refresh" "--upgrade" "open-webui")
+        echo "Running: ${install_cmd[*]}" >&2
+        "${install_cmd[@]}" >> "$UPGRADE_LOG" 2>&1 || exit 4
+    )
+    local rc=$?
+    case $rc in
+        1) error_exit "Cannot cd to $OPENWEBUI_DIR" ;;
+        2) error_exit "Failed to init uv project" ;;
+        3) error_exit "Failed to create venv" ;;
+        4) log "OpenWebUI upgrade failed — see $UPGRADE_LOG. Your data is safe; run 'ailocal restore' if needed."; return 1 ;;
+    esac
+
+    local after
+    after=$(webui_installed_version)
+    if [[ -n "$before" && "$before" == "$after" ]]; then
+        # Make the no-op VISIBLE — a silent "successful" no-op is how
+        # --force became the only upgrade that ever worked.
+        log "OpenWebUI is still at $after — no newer version was installed."
+        log "If PyPI has a newer release, the venv's Python (3.11) may be too old for it; try 'ailocal upgrade webui --force'."
+    else
+        log "OpenWebUI upgraded: ${before:-none} → ${after:-unknown}"
+        log "If anything misbehaves: 'ailocal restore' brings back the pre-upgrade state."
+    fi
+    return 0
+}
+
+upgrade_target() {
+    case "${1:-}" in
+        ollama) upgrade_ollama ;;
+        webui)  upgrade_webui "$2" ;;
+        all)    upgrade_ollama && upgrade_webui "$2" ;;
+        *)      show_help; return 1 ;;
+    esac
+}
+
+# === MAIN CLI ===
+
+show_help() {
+    cat << EOF
+ailocal $AILOCAL_VERSION - Unified AI Service Manager
+
+Usage: ailocal VERB [TARGET] [OPTIONS]
+
+Services (TARGET: ollama | webui | searxng | all — default all):
+  start   [target]            Start service(s)
+  stop    [target]            Stop service(s)
+  restart [target]            Stop + start (required after 'brew upgrade ollama')
+  status                      Services, versions, and backup age
+                              (searxng shown only if the local install exists;
+                               install it with installer/install_searxng.sh)
+
+Upgrades (every webui upgrade snapshots the current state first):
+  upgrade webui [--force]     Upgrade; shows version before → after.
+                              --force reinstalls the venv from scratch.
+  upgrade ollama              Upgrade app + refresh all models
+  upgrade all [--force]       Both
+
+Backup (ONE slot — the state before the last upgrade/backup):
+  backup                      Snapshot now, replacing the previous one
+  restore [--yes]             Go back to the snapshot (--yes skips confirm)
+
+Environment:
+  WEBUI_START_TIMEOUT   Seconds to wait for startup (default 180).
+  AILOCAL_NO_OPEN       Set to skip opening the browser on start.
+EOF
+}
+
+case "$1" in
+    status)  status ;;
+    start)   start_target "$2" ;;
+    stop)    stop_target "$2" ;;
+    restart) restart_target "$2" ;;
+    upgrade) upgrade_target "$2" "$3" ;;
+    backup)  create_backup ;;
+    restore) restore_backup "$2" ;;
+
+    # --- Legacy aliases (kept for muscle memory; not in help) ---
+    startwebui)  startwebui ;;
+    stopwebui)   stopwebui ;;
+    startollama) startollama ;;
+    stopollama)  stopollama ;;
+    startall|start-all) start_target all ;;
+    stopall|stop-all)   stop_target all ;;
+    startsearxng)       startsearxng ;;
+    stopsearxng)        stopsearxng ;;
+    safe-upgrade)       upgrade_webui "$2" ;;   # backup-first is built in now
+    restore-backup)     restore_backup "$2" ;;
+
+    -v|--version) echo "ailocal $AILOCAL_VERSION" ;;
+    help|-h|--help|*) show_help ;;
+esac
