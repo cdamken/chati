@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.0.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.0.2-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -207,6 +207,8 @@ It deliberately **keeps Homebrew and its packages** (`jq`, `curl`, `ollama`, `te
 ## AI Local Service Manager (`ai_local/ailocal`)
 
 Manages Ollama and OpenWebUI as local services.
+
+> `setup.sh` symlinks `ailocal` onto your PATH, so you can run **`ailocal …`** from any directory. The `./ai_local/ailocal …` form used in the examples below is equivalent (and works even without the PATH link).
 
 ### Dependencies
 

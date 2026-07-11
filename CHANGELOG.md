@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.0.2] - 2026-07-12
+
+### Added
+- `ailocal` is now also symlinked onto `$PATH` by `setup.sh` (alongside
+  `chati`), so `ailocal status|start|stop|upgrade …` works from any directory.
+  `--remove-all` cleans up both links.
+
 ## [1.0.1] - 2026-07-11
 
 ### Fixed

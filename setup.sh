@@ -104,7 +104,7 @@ remove_all() {
     echo "     • OpenWebUI:        ~/openwebui"
     echo "     • Local SearXNG:    ~/searxng"
     echo "     • Logs:             ~/logs"
-    echo "     • chati PATH link:  ${brew_bin:-<brew bin>}/chati"
+    echo "     • PATH links:       ${brew_bin:-<brew bin>}/{chati,ailocal}"
     echo "     • Repo state:       .env, .active_ollama_model.txt, .web_cache,"
     echo "                         conversation_histories/, ola_chat/instances/"
     echo "     • Ollama models:    all pulled models${models:+ ($(printf '%s' "$models" | paste -sd, -))}"
@@ -144,9 +144,12 @@ remove_all() {
     pkill -f 'granian.*searx\.webapp' >/dev/null 2>&1 || true
     ok "Services stopped"
 
-    step "Removing the 'chati' PATH link"
-    [[ -n "$brew_bin" && -L "$brew_bin/chati" ]] && rm -f "$brew_bin/chati"
-    ok "Link removed"
+    step "Removing the 'chati' and 'ailocal' PATH links"
+    if [[ -n "$brew_bin" ]]; then
+        [[ -L "$brew_bin/chati" ]] && rm -f "$brew_bin/chati"
+        [[ -L "$brew_bin/ailocal" ]] && rm -f "$brew_bin/ailocal"
+    fi
+    ok "Links removed"
 
     step "Removing installed apps and state"
     rm -rf "$HOME/openwebui" "$HOME/searxng" "$HOME/logs"
@@ -207,15 +210,17 @@ chmod +x "$REPO_ROOT/chati" \
          "$REPO_ROOT/installer/install_searxng.sh" 2>/dev/null || true
 ok "Scripts are executable"
 
-# ---- 5b. Make `chati` runnable from anywhere --------------------------------
-# Symlink chati into Homebrew's bin (already on PATH and user-writable). chati
-# resolves symlinks to locate its repo, so the command works from any dir.
-step "Linking 'chati' onto your PATH"
+# ---- 5b. Make `chati` and `ailocal` runnable from anywhere ------------------
+# Symlink both into Homebrew's bin (already on PATH and user-writable). chati
+# resolves symlinks to locate its repo; ailocal uses $HOME-based paths and
+# doesn't care where it's invoked from — so both work from any directory.
+step "Linking 'chati' and 'ailocal' onto your PATH"
 BREW_BIN="$(brew --prefix)/bin"
-if ln -sf "$REPO_ROOT/chati" "$BREW_BIN/chati" 2>/dev/null; then
-    ok "You can now run 'chati' from anywhere"
+if ln -sf "$REPO_ROOT/chati" "$BREW_BIN/chati" 2>/dev/null \
+   && ln -sf "$REPO_ROOT/ai_local/ailocal" "$BREW_BIN/ailocal" 2>/dev/null; then
+    ok "You can now run 'chati' and 'ailocal' from anywhere"
 else
-    warn "Couldn't link into $BREW_BIN — run it as ./chati, or add $REPO_ROOT to your PATH."
+    warn "Couldn't link into $BREW_BIN — run them as ./chati and ./ai_local/ailocal, or add the repo to your PATH."
 fi
 
 # ---- 6. Start Ollama ---------------------------------------------------------
@@ -325,14 +330,14 @@ if [[ "$WANT_WEBUI" -eq 1 ]]; then
     if [[ "$WEBUI_STARTED" -eq 1 ]]; then
         echo "Browser UI (running):    open http://127.0.0.1:8888"
     else
-        echo "Browser UI (start it):   ./ai_local/ailocal start webui"
+        echo "Browser UI (start it):   ailocal start webui"
     fi
 fi
 if [[ "$WANT_SEARXNG" -eq 1 && "$SEARXNG_STARTED" -eq 1 ]]; then
     echo "Web search (/web):       ready — toggle with /web inside chati"
 fi
 cat <<EOF
-Service status:          ./ai_local/ailocal status
+Service status:          ailocal status
 Faster /web routing:     ollama pull llama3.2:3b
 Uninstall everything:    ./setup.sh --remove-all
 EOF
