@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.2.1] - 2026-07-22
+
+### Added
+- Apple Silicon performance tuning: the Ollama service is now started with
+  `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0` (the Homebrew
+  formula's recommended flags) in `ailocal`, `chati` and `setup.sh` — less
+  memory and faster inference for large models. Both are overridable via env.
+  GPU/MLX acceleration remains automatic; documented in the README.
+
 ## [1.2.0] - 2026-07-22
 
 ### Added

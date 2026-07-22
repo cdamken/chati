@@ -736,6 +736,9 @@ ensure_ollama_running() {
     fi
     echo "🚀 Starting 'ollama serve' (logs: ~/logs/ollama.log)..."
     mkdir -p "$HOME/logs"
+    # Apple Silicon perf tuning (see ailocal): flash attention + q8 KV cache.
+    export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+    export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
     nohup ollama serve >"$HOME/logs/ollama.log" 2>&1 &
     # Wait up to ~10s for the API to come up.
     local i

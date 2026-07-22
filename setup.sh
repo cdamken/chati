@@ -251,6 +251,10 @@ ollama_up() { curl -fsS --max-time 2 http://localhost:11434/api/tags >/dev/null 
 if ollama_up; then
     ok "Ollama already running"
 else
+    # Apple Silicon perf tuning (Homebrew ollama formula's recommended flags):
+    # flash attention + q8 KV cache. GPU/MLX acceleration is automatic.
+    export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+    export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
     nohup ollama serve >"$HOME/logs/ollama.log" 2>&1 &
     for _ in {1..15}; do ollama_up && break; sleep 1; done
     ollama_up && ok "Ollama is ready" || die "Ollama didn't come up. Check ~/logs/ollama.log"

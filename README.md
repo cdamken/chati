@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.2.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.2.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -349,6 +349,17 @@ near-instant while keeping a big model for the final answer.
 | `MAX_URL_CHARS`           | `15000`                       | Cap on `/url` fetched content                                 |
 | `MAX_COMPRESS_CHARS`      | `10000`                       | Cap on context the compressor reads                           |
 | `WEB_CACHE_DIR`           | `~/chat/.web_cache`           | Parent dir for per-turn `turn.XXXXXX` scratch dirs (wiped after each turn) |
+
+### Apple Silicon acceleration
+
+On Apple Silicon, Ollama uses the GPU **automatically** (Metal, and the MLX runtime bundled with the Homebrew build) — there is nothing to "turn on". The service starters (`ailocal`, `chati`, `setup.sh`) additionally set two performance flags recommended by the Homebrew formula, so large models use less memory and run faster:
+
+| Variable                  | Default   | Purpose                                                              |
+|---------------------------|-----------|---------------------------------------------------------------------|
+| `OLLAMA_FLASH_ATTENTION`  | `1`       | Flash attention — faster, lower memory                              |
+| `OLLAMA_KV_CACHE_TYPE`    | `q8_0`    | Quantize the KV cache to 8-bit — big memory saving on long contexts |
+
+Export different values before starting a service to override them. Keeping Ollama current (`ailocal upgrade ollama`) is what pulls in newer MLX/Metal improvements.
 
 ---
 

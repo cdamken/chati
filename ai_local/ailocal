@@ -246,6 +246,12 @@ startollama() {
         echo "Ollama is already running"
         return 0
     fi
+    # Apple Silicon perf tuning (Homebrew ollama formula's recommended flags):
+    # flash attention + q8 KV cache → less memory and faster inference,
+    # especially for large models. GPU/MLX acceleration itself is automatic.
+    # Override by exporting these before starting.
+    export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+    export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
     nohup ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
     echo "Ollama started. Logs at $LOG_DIR/ollama.log"
 }
