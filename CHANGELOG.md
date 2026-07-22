@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.2.2] - 2026-07-22
+
+### Changed
+- The installer's default model is **`gemma4:26b`**, installed automatically
+  by `./setup.sh` with no flags. Reverted the RAM-based auto-selection added
+  in 1.2.0, which silently overrode that default (e.g. picking `llama3.3:70b`
+  on a 48 GB Mac). RAM detection is gone; the default is flat and predictable.
+  Use `--model NAME` for anything else (e.g. `llama3.3:70b` on a high-RAM Mac).
+
 ## [1.2.1] - 2026-07-22
 
 ### Added
