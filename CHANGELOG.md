@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.2.0] - 2026-07-22
+
+### Added
+- **RAM-aware model selection.** `setup.sh` now detects the Mac's unified
+  memory (`sysctl hw.memsize`) and auto-picks a chat model sized for it:
+  ≥48 GB → `llama3.3:70b` (~42 GB), 32–47 GB → `gemma4:26b` (~17 GB),
+  16–31 GB → `llama3.1:8b-instruct-q8_0` (~8.5 GB), <16 GB → `gemma3:4b`.
+  `--model NAME` forces a specific model and skips the auto-pick. A very
+  large auto-pick (the 70B) asks before the multi-GB download, and is never
+  auto-pulled in a non-interactive run (use `--yes` or `--model`).
+
 ## [1.1.0] - 2026-07-22
 
 ### Changed

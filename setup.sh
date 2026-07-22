@@ -24,9 +24,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BREWFILE="$REPO_ROOT/installer/Brewfile"
 
-# Default chat model pulled when none is installed. gemma4:26b is a large,
-# high-quality general model (~17 GB download, needs a good amount of RAM).
-# For a much lighter setup, override with --model (e.g. --model gemma3:4b).
+# Chat model. By default it is chosen automatically from the Mac's unified
+# memory (see recommend_model below). DEFAULT_CHAT_MODEL is only the fallback
+# if RAM can't be detected. Override the whole thing with --model NAME.
 DEFAULT_CHAT_MODEL="gemma4:26b"
 SEARXNG_LOCAL_URL="http://127.0.0.1:8890"
 
@@ -36,7 +36,20 @@ WANT_SEARXNG=1
 WANT_PULL=1
 REMOVE_ALL=0
 ASSUME_YES=0
+MODEL_EXPLICIT=0                 # set to 1 when the user forces --model
 CHAT_MODEL="$DEFAULT_CHAT_MODEL"
+
+# Detect unified memory (GB) and recommend a chat model sized for the machine.
+# Apple Silicon shares RAM between CPU and GPU, so bigger RAM → bigger model.
+detect_ram_gb() { echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )); }
+recommend_model() {
+    local gb="$1"
+    if   (( gb >= 48 )); then echo "llama3.3:70b"                # ~42 GB, top reasoning
+    elif (( gb >= 32 )); then echo "gemma4:26b"                  # ~17 GB, strong
+    elif (( gb >= 16 )); then echo "llama3.1:8b-instruct-q8_0"   # ~8.5 GB, fast + sharp
+    elif (( gb >=  1 )); then echo "gemma3:4b"                   # ~3.3 GB, lightweight
+    else                      echo "$DEFAULT_CHAT_MODEL"; fi     # detection failed → fallback
+}
 
 # ---- Pretty output helpers ---------------------------------------------------
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
@@ -55,8 +68,13 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
   ./setup.sh --minimal      CLI only — skip OpenWebUI and SearXNG
   ./setup.sh --no-webui     skip OpenWebUI only
   ./setup.sh --no-searxng   skip SearXNG only
-  ./setup.sh --model NAME    use a specific chat model (default: gemma4:26b; lighter: gemma3:4b)
+  ./setup.sh --model NAME    force a specific chat model (skips RAM auto-pick)
   ./setup.sh --no-pull       do not pull a model (assume one already exists)
+
+By default the chat model is auto-picked from unified memory:
+  >=48 GB -> llama3.3:70b (~42 GB) | 32-47 -> gemma4:26b (~17 GB)
+  16-31   -> llama3.1:8b-instruct-q8_0 (~8.5 GB) | <16 -> gemma3:4b (~3.3 GB)
+A very large auto-pick asks before the multi-GB download (skip with --yes).
   ./setup.sh --remove-all    UNINSTALL everything this script set up (asks first)
   ./setup.sh --remove-all --yes   same, without the confirmation prompt
   ./setup.sh --help          show this help
@@ -77,7 +95,7 @@ while [[ $# -gt 0 ]]; do
         --webui)     WANT_WEBUI=1 ;;     # accepted for compatibility (now default)
         --searxng)   WANT_SEARXNG=1 ;;   # accepted for compatibility (now default)
         --no-pull)   WANT_PULL=0 ;;
-        --model)     CHAT_MODEL="${2:?--model needs a model name}"; shift ;;
+        --model)     CHAT_MODEL="${2:?--model needs a model name}"; MODEL_EXPLICIT=1; shift ;;
         --remove-all) REMOVE_ALL=1 ;;
         --yes|-y)    ASSUME_YES=1 ;;
         -v|--version) echo "chati $(cat "$REPO_ROOT/VERSION" 2>/dev/null || echo unknown)"; exit 0 ;;
@@ -242,6 +260,31 @@ fi
 step "Ensuring a chat model is available"
 installed_models() { ollama list 2>/dev/null | tail -n +2 | awk '{print $1}'; }
 have_any_model() { [[ -n "$(installed_models)" ]]; }
+
+# Unless the user forced --model, pick one sized for this Mac's memory.
+if [[ "$MODEL_EXPLICIT" -ne 1 ]]; then
+    RAM_GB=$(detect_ram_gb)
+    CHAT_MODEL="$(recommend_model "$RAM_GB")"
+    ok "Detected ${RAM_GB} GB unified memory → recommended model: $CHAT_MODEL"
+    # Guard a big auto-download (the 70B tier is ~42 GB). Explicit --model or
+    # --yes skips the prompt; a non-interactive shell won't auto-pull it.
+    if [[ "$WANT_PULL" -eq 1 && "$ASSUME_YES" -ne 1 ]] \
+       && ! installed_models | grep -qxF "$CHAT_MODEL" \
+       && [[ "$CHAT_MODEL" == llama3.3:70b* ]]; then
+        if [[ -t 0 ]]; then
+            printf '   \033[33m%s is a large model (~42 GB download, needs ~40+ GB RAM). Download it now? [Y/n] \033[0m' "$CHAT_MODEL"
+            read -r _reply
+            if [[ "$_reply" == [nN]* ]]; then
+                WANT_PULL=0
+                warn "Skipped. Re-run choosing a lighter model, e.g.: ./setup.sh --model gemma3:4b"
+            fi
+        else
+            WANT_PULL=0
+            warn "$CHAT_MODEL (~42 GB) not auto-downloaded in a non-interactive run."
+            warn "Re-run with --yes to pull it, or --model NAME for a lighter one."
+        fi
+    fi
+fi
 
 if [[ "$WANT_PULL" -eq 0 ]]; then
     have_any_model \
