@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.3.0] - 2026-07-22
+
+### Added
+- Memory-based model selection (done right this time): `setup.sh` detects
+  unified memory and auto-selects a model that fits — **≥32 GB → `gemma4:26b`**
+  (so a 48 GB Mac gets gemma4:26b automatically, no `--model` needed),
+  16–31 GB → `llama3.1:8b-instruct-q8_0`, <16 GB → `gemma3:4b`. `--model NAME`
+  still forces a specific model. Unlike the 1.2.0 attempt, the table is
+  gemma-centric so it doesn't override gemma4:26b on typical Macs.
+
 ## [1.2.2] - 2026-07-22
 
 ### Changed

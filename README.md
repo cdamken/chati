@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.2.2-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.3.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -35,7 +35,7 @@ cd ~/chat
 - 🌐 **Browser UI:** already running at **http://127.0.0.1:8888**
 - 🔎 **Web search:** local SearXNG is running and wired in — toggle it inside chati with `/web`
 
-> The installer pulls **`gemma4:26b`** by default (~17 GB, a strong general model). Want a different one? `./setup.sh --model NAME` (e.g. the lighter `gemma3:4b`, or `llama3.3:70b` on a high-RAM Mac), or switch live in chati with `/model`.
+> The installer **detects your Mac's memory and picks a model that fits**: **≥32 GB → `gemma4:26b`** (~17 GB, the target), 16–31 GB → `llama3.1:8b-instruct-q8_0`, <16 GB → `gemma3:4b`. Force any model with `./setup.sh --model NAME`, or switch live in chati with `/model`.
 >
 > **CLI only?** `./setup.sh --minimal` skips the browser app and SearXNG. **Undo everything?** `./setup.sh --remove-all` (see [Uninstalling](#uninstalling-remove-all)).
 >
@@ -122,7 +122,7 @@ Options (add any of these to the command above):
 | `--minimal` | CLI only — skip **both** OpenWebUI and SearXNG (no Python/uv install) |
 | `--no-webui` | skip OpenWebUI only |
 | `--no-searxng` | skip the local SearXNG only |
-| `--model NAME` | use a chat model other than the default `gemma4:26b` (e.g. lighter `--model gemma3:4b`) |
+| `--model NAME` | force a chat model, skipping the memory-based pick (e.g. `--model llama3.3:70b`) |
 | `--no-pull` | skip the model download (you'll pull one yourself) |
 | `--remove-all` | **uninstall** everything setup installed (see [Uninstalling](#uninstalling-remove-all)) |
 | `--help` | full option list |
@@ -150,7 +150,15 @@ chati
 
 (Or `./chati` from inside the repo.)
 
-> **Model note:** `setup.sh` pulls **`gemma4:26b`** by default (~17 GB, a strong general model) and points chati at it. Use a different model with `./setup.sh --model NAME` (e.g. the lighter `gemma3:4b`, or a bigger `llama3.3:70b` on a high-RAM Mac). If the configured model isn't installed (e.g. after switching machines), chati **auto-falls-back** to an installed model instead of failing every message — pick any model anytime with `/model`. For a faster `/web` triage router, also pull a small model: `ollama pull llama3.2:3b`.
+> **Model note:** `setup.sh` detects unified memory and selects a model that fits, then points chati at it:
+>
+> | Unified RAM | Model | Size |
+> |---|---|---|
+> | ≥ 32 GB | `gemma4:26b` | ~17 GB |
+> | 16–31 GB | `llama3.1:8b-instruct-q8_0` | ~8.5 GB |
+> | < 16 GB | `gemma3:4b` | ~3.3 GB |
+>
+> Force a specific model with `./setup.sh --model NAME` (e.g. `llama3.3:70b` on a high-RAM Mac). If the configured model isn't installed (e.g. after switching machines), chati **auto-falls-back** to an installed model instead of failing every message — pick any model anytime with `/model`. For a faster `/web` triage router, also pull a small model: `ollama pull llama3.2:3b`.
 
 ### 5. OpenWebUI — browser UI on top of Ollama
 
