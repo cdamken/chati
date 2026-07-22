@@ -85,7 +85,7 @@ export DOCR_CMD="${DOCR_CMD:-$DOCR_DIR/docr}"
 export OLLAMA_API="${OLLAMA_API:-http://localhost:11434}"
 # Single source of truth for the default model. Override via the env if
 # you want a different fallback when no $ACTIVE_MODEL_FILE exists yet.
-export DEFAULT_MODEL="${DEFAULT_MODEL:-llama3.2:1b}"
+export DEFAULT_MODEL="${DEFAULT_MODEL:-gemma4:26b}"
 
 # --- BACKEND INTEROP ---
 # Where ola writes the final response so chati can read it without

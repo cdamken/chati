@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.1.0] - 2026-07-22
+
+### Changed
+- Default chat model is now **`gemma4:26b`** (was `gemma3:4b`) — a large,
+  high-quality model (~17 GB). Made consistent across the whole project: the
+  `lib_chat.sh` fallback `DEFAULT_MODEL` was still `llama3.2:1b`, so running
+  `chati` without `setup.sh` fell back to a tiny model instead of the
+  documented default; it now matches. Override with `./setup.sh --model NAME`
+  (e.g. the lighter `gemma3:4b`) or `/model` in-chat.
+
 ## [1.0.2] - 2026-07-12
 
 ### Added

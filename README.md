@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.0.2-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -35,7 +35,7 @@ cd ~/chat
 - 🌐 **Browser UI:** already running at **http://127.0.0.1:8888**
 - 🔎 **Web search:** local SearXNG is running and wired in — toggle it inside chati with `/web`
 
-> The default chat model is **`gemma3:4b`**. Want a different one? `./setup.sh --model NAME`, or switch live inside chati with `/model`.
+> The default chat model is **`gemma4:26b`** (a large, high-quality model — ~17 GB, needs a good amount of RAM). Want something lighter or different? `./setup.sh --model gemma3:4b` (or any model), or switch live inside chati with `/model`.
 >
 > **CLI only?** `./setup.sh --minimal` skips the browser app and SearXNG. **Undo everything?** `./setup.sh --remove-all` (see [Uninstalling](#uninstalling-remove-all)).
 >
@@ -122,7 +122,7 @@ Options (add any of these to the command above):
 | `--minimal` | CLI only — skip **both** OpenWebUI and SearXNG (no Python/uv install) |
 | `--no-webui` | skip OpenWebUI only |
 | `--no-searxng` | skip the local SearXNG only |
-| `--model NAME` | use a specific chat model instead of the default (e.g. `--model gemma3:4b`) |
+| `--model NAME` | use a specific chat model instead of the default `gemma4:26b` (e.g. a lighter `--model gemma3:4b`) |
 | `--no-pull` | skip the model download (you'll pull one yourself) |
 | `--remove-all` | **uninstall** everything setup installed (see [Uninstalling](#uninstalling-remove-all)) |
 | `--help` | full option list |
@@ -150,7 +150,7 @@ chati
 
 (Or `./chati` from inside the repo.)
 
-> **Model note:** the default model pulled is **`gemma3:4b`** (override with `./setup.sh --model NAME`). If the configured model isn't installed (e.g. after switching machines), chati **auto-falls-back** to an installed model instead of failing every message — pick any model anytime with `/model`. For a faster `/web` triage router, also pull a small model: `ollama pull llama3.2:3b`.
+> **Model note:** the default model pulled is **`gemma4:26b`** (~17 GB; override with `./setup.sh --model NAME`, e.g. the lighter `gemma3:4b`). If the configured model isn't installed (e.g. after switching machines), chati **auto-falls-back** to an installed model instead of failing every message — pick any model anytime with `/model`. For a faster `/web` triage router, also pull a small model: `ollama pull llama3.2:3b`.
 
 ### 5. OpenWebUI — browser UI on top of Ollama
 
@@ -331,7 +331,7 @@ near-instant while keeping a big model for the final answer.
 | Variable                  | Default                       | Purpose                                                       |
 |---------------------------|-------------------------------|---------------------------------------------------------------|
 | `OLLAMA_API`              | `http://localhost:11434`      | Ollama HTTP endpoint                                          |
-| `DEFAULT_MODEL`           | `llama3.2:1b`                 | Fallback model when no `.active_ollama_model.txt` is set yet  |
+| `DEFAULT_MODEL`           | `gemma4:26b`                  | Fallback model when no `.active_ollama_model.txt` is set yet  |
 | `OLA_CURL_TIMEOUT`        | `600`                         | Streaming chat timeout (seconds)                              |
 | `OLA_CURL_META_TIMEOUT`   | `60`                          | Background meta calls (autorename, compress)                  |
 | `COMPRESS_EVERY`          | `20`                          | Auto-compress memory every N new messages                     |

@@ -24,9 +24,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BREWFILE="$REPO_ROOT/installer/Brewfile"
 
-# Default chat model pulled when none is installed. gemma3:4b is a solid,
-# good-quality general model; override with --model NAME.
-DEFAULT_CHAT_MODEL="gemma3:4b"
+# Default chat model pulled when none is installed. gemma4:26b is a large,
+# high-quality general model (~17 GB download, needs a good amount of RAM).
+# For a much lighter setup, override with --model (e.g. --model gemma3:4b).
+DEFAULT_CHAT_MODEL="gemma4:26b"
 SEARXNG_LOCAL_URL="http://127.0.0.1:8890"
 
 # Install everything by default; flags only subtract or tweak.
@@ -54,7 +55,7 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
   ./setup.sh --minimal      CLI only — skip OpenWebUI and SearXNG
   ./setup.sh --no-webui     skip OpenWebUI only
   ./setup.sh --no-searxng   skip SearXNG only
-  ./setup.sh --model NAME    use a specific chat model (default: gemma3:4b)
+  ./setup.sh --model NAME    use a specific chat model (default: gemma4:26b; lighter: gemma3:4b)
   ./setup.sh --no-pull       do not pull a model (assume one already exists)
   ./setup.sh --remove-all    UNINSTALL everything this script set up (asks first)
   ./setup.sh --remove-all --yes   same, without the confirmation prompt
