@@ -53,6 +53,7 @@ DEFAULT_VOICE="AUTO"     # Automatic voice detection
 VOICE_MODE="OFF"         # Global talk toggle
 WEB_MODE="OFF"           # Global web search toggle
 AGENT_MODE="OFF"         # Global autonomous agent toggle
+AGENT_AUTOACCEPT="OFF"   # /aY: run EVERY proposed command without asking
 FORCE_LANG="auto"        # Language forcing (auto, en, es, de, etc.)
 SAY_COLORS="white/green" # Default colors for speech highlighting
 SAY_SPEED=1.0            # Speech speed multiplier (1.0 = 200 wpm)
@@ -657,6 +658,8 @@ show_settings() {
         system_prompt_text=$(head -c 200 "$prompt_file")
         [[ $(wc -c < "$prompt_file") -gt 200 ]] && system_prompt_text="${system_prompt_text}…"
     fi
+    local agent_status="$AGENT_MODE   (read-only runs; risky asks y/N)"
+    [[ "$AGENT_AUTOACCEPT" == "ON" ]] && agent_status="ON 🔴 AUTO-ACCEPT (/aY: runs EVERYTHING without asking)"
     cat << EOF
 
 Current Chati Settings:
@@ -664,7 +667,7 @@ Current Chati Settings:
 🤖 Model:    $curr_model
 🌐 Lang:     $FORCE_LANG
 🔎 Web:      $WEB_MODE
-🛠️  Agent:    $AGENT_MODE   (when ON: AI may propose shell commands; you approve each)
+🛠️  Agent:    $agent_status
 🗣️  Talk:     $VOICE_MODE (Voice: $DEFAULT_VOICE, Speed: ${SAY_SPEED}x, Colors: $SAY_COLORS)
 📅 Session:  $curr_sess
 🎭 Prompt:   $system_prompt_text
@@ -723,6 +726,10 @@ Mode Toggles:
                         "Execute? (y/N)" — denied unless you type y.
                         Set CHATI_AGENT_CONFIRM=all to confirm every
                         command. Off by default.
+/aY  (/ay, /aa)         Toggle AUTO-ACCEPT: turns Agent Mode on and runs
+                        EVERY proposed command WITHOUT asking — including
+                        destructive ones. Shows a warning; only for a task
+                        you're watching. /aY again (or /a) turns it off.
 
 Configuration:
 --------------
@@ -936,13 +943,24 @@ while true; do
                 ;;
             /agent|/a)
                 if [[ "$AGENT_MODE" == "ON" ]]; then
-                    AGENT_MODE="OFF"
+                    AGENT_MODE="OFF"; AGENT_AUTOACCEPT="OFF"
                     echo "🛠️  Agent Mode: OFF — AI can no longer run shell commands."
                 else
-                    AGENT_MODE="ON"
+                    AGENT_MODE="ON"; AGENT_AUTOACCEPT="OFF"
                     echo "🛠️  Agent Mode: ON — AI may now propose shell commands on your Mac."
                     echo "    Read-only commands run directly; anything that could change"
                     echo "    files/processes/network/system warns + asks 'Execute? (y/N)'."
+                fi ;;
+            /aY|/ay|/aa)
+                if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
+                    AGENT_AUTOACCEPT="OFF"
+                    echo "🛠️  Auto-accept: OFF — back to normal Agent Mode (risky commands ask first)."
+                else
+                    AGENT_MODE="ON"; AGENT_AUTOACCEPT="ON"
+                    echo "🔴 ⚠️  AUTO-ACCEPT MODE ON — the AI will run EVERY command it proposes"
+                    echo "       on your Mac WITHOUT asking, INCLUDING destructive ones (rm, sudo,"
+                    echo "       network, overwrites…). Only use it for a task you're actively"
+                    echo "       watching. Press Ctrl-C to interrupt. Type /aY again to turn it off."
                 fi ;;
             /web|/w)
                 if [[ "$WEB_MODE" == "ON" ]]; then
@@ -1058,7 +1076,10 @@ while true; do
             # warning first. Set CHATI_AGENT_CONFIRM=all to confirm EVERYTHING
             # (the classic behaviour).
             run_it=0
-            if [[ "${CHATI_AGENT_CONFIRM:-}" != "all" ]] && agent_cmd_is_safe "$agent_cmd"; then
+            if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
+                echo "   🔴 auto-accept (/aY) — running without asking"
+                run_it=1
+            elif [[ "${CHATI_AGENT_CONFIRM:-}" != "all" ]] && agent_cmd_is_safe "$agent_cmd"; then
                 echo "   ✅ read-only — running without confirmation"
                 run_it=1
             else

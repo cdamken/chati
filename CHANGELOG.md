@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.6.0] - 2026-07-22
+
+### Added
+- **`/aY` auto-accept mode** in Agent Mode. `/aY` (aliases `/ay`, `/aa`) turns
+  Agent Mode on and runs **every** proposed command **without asking** —
+  including destructive ones — for a hands-off task you're actively watching. A
+  prominent warning is shown on enable; `/settings` shows a red AUTO-ACCEPT
+  status; `/aY` again (or `/a`) turns it off. Default stays the safe whitelist.
+
 ## [1.5.0] - 2026-07-22
 
 ### Changed
