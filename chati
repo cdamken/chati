@@ -726,10 +726,12 @@ Mode Toggles:
                         "Execute? (y/N)" — denied unless you type y.
                         Set CHATI_AGENT_CONFIRM=all to confirm every
                         command. Off by default.
-/aY  (/ay, /aa)         Toggle AUTO-ACCEPT: turns Agent Mode on and runs
-                        EVERY proposed command WITHOUT asking — including
-                        destructive ones. Shows a warning; only for a task
-                        you're watching. /aY again (or /a) turns it off.
+/aY                     Toggle AUTO-ACCEPT (capital Y, on purpose so it
+                        can't happen by accident): runs EVERY proposed
+                        command WITHOUT asking — including destructive ones.
+                        Shows a warning; only for a task you're watching.
+                        /aY again — or /a — returns to verification. There
+                        is no agent without safety unless you type /aY.
 
 Configuration:
 --------------
@@ -942,25 +944,29 @@ while true; do
                 fi
                 ;;
             /agent|/a)
-                if [[ "$AGENT_MODE" == "ON" ]]; then
-                    AGENT_MODE="OFF"; AGENT_AUTOACCEPT="OFF"
-                    echo "🛠️  Agent Mode: OFF — AI can no longer run shell commands."
-                else
-                    AGENT_MODE="ON"; AGENT_AUTOACCEPT="OFF"
-                    echo "🛠️  Agent Mode: ON — AI may now propose shell commands on your Mac."
-                    echo "    Read-only commands run directly; anything that could change"
-                    echo "    files/processes/network/system warns + asks 'Execute? (y/N)'."
-                fi ;;
-            /aY|/ay|/aa)
+                # /a never enables auto-accept. From auto-accept it de-escalates
+                # to verification; otherwise it toggles ON(verification)/OFF.
                 if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
                     AGENT_AUTOACCEPT="OFF"
-                    echo "🛠️  Auto-accept: OFF — back to normal Agent Mode (risky commands ask first)."
+                    echo "🛡️  Agent Mode: ON (verification) — auto-accept OFF; risky commands ask 'Execute? (y/N)' again."
+                elif [[ "$AGENT_MODE" == "ON" ]]; then
+                    AGENT_MODE="OFF"
+                    echo "🛠️  Agent Mode: OFF — AI can no longer run shell commands."
+                else
+                    AGENT_MODE="ON"
+                    echo "🛡️  Agent Mode: ON (verification) — read-only runs directly; anything that could"
+                    echo "    change files/processes/network/system asks 'Execute? (y/N)'."
+                fi ;;
+            /aY)   # capital Y on purpose — a deliberate, can't-happen-by-accident switch
+                if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
+                    AGENT_AUTOACCEPT="OFF"   # AGENT_MODE stays ON → back to verification
+                    echo "🛡️  Agent Mode: ON (verification) — auto-accept OFF; risky commands ask again."
                 else
                     AGENT_MODE="ON"; AGENT_AUTOACCEPT="ON"
-                    echo "🔴 ⚠️  AUTO-ACCEPT MODE ON — the AI will run EVERY command it proposes"
-                    echo "       on your Mac WITHOUT asking, INCLUDING destructive ones (rm, sudo,"
-                    echo "       network, overwrites…). Only use it for a task you're actively"
-                    echo "       watching. Press Ctrl-C to interrupt. Type /aY again to turn it off."
+                    echo "🔴 ⚠️  AUTO-ACCEPT ON — the AI will run EVERY command it proposes on your Mac"
+                    echo "       WITHOUT asking, INCLUDING destructive ones (rm, sudo, network, overwrites…)."
+                    echo "       Only for a task you're actively watching. Ctrl-C interrupts."
+                    echo "       Type /aY again (or /a) to return to verification."
                 fi ;;
             /web|/w)
                 if [[ "$WEB_MODE" == "ON" ]]; then

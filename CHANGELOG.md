@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.6.1] - 2026-07-22
+
+### Changed
+- Auto-accept is now **only** `/aY` (capital Y) — removed the `/ay` and `/aa`
+  aliases so it can't be triggered by a lowercase reflex; it must be deliberate.
+- `/a` and `/aY` both de-escalate to **verification** (never leave you in an
+  insecure state): `/a` from auto-accept → verification; `/aY` again →
+  verification. The only difference between `/a` and `/aY` is that `/a` asks and
+  `/aY` doesn't (and warns). There is no agent mode without safety unless you
+  explicitly type `/aY`.
+
 ## [1.6.0] - 2026-07-22
 
 ### Added
