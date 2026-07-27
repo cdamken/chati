@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.4.0] - 2026-07-22
+
+### Added
+- **Login autostart.** `ailocal autostart on|off|status` installs/removes a
+  macOS LaunchAgent that runs `ailocal start` at login, so Ollama + OpenWebUI
+  + SearXNG come up automatically. It runs through a login shell, so terminal
+  env applies (e.g. `OLLAMA_HOST=0.0.0.0` for LAN access carries over).
+  `./setup.sh --remove-all` removes the agent.
+
 ## [1.3.0] - 2026-07-22
 
 ### Added

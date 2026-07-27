@@ -122,6 +122,7 @@ remove_all() {
     echo "     • Local SearXNG:    ~/searxng"
     echo "     • Logs:             ~/logs"
     echo "     • PATH links:       ${brew_bin:-<brew bin>}/{chati,ailocal}"
+    echo "     • Autostart agent:  ~/Library/LaunchAgents/com.chati.ailocal.plist"
     echo "     • Repo state:       .env, .active_ollama_model.txt, .web_cache,"
     echo "                         conversation_histories/, ola_chat/instances/"
     echo "     • Ollama models:    all pulled models${models:+ ($(printf '%s' "$models" | paste -sd, -))}"
@@ -167,6 +168,12 @@ remove_all() {
         [[ -L "$brew_bin/ailocal" ]] && rm -f "$brew_bin/ailocal"
     fi
     ok "Links removed"
+
+    step "Removing the login autostart agent (if any)"
+    launchctl bootout "gui/$(id -u)/com.chati.ailocal" 2>/dev/null \
+        || launchctl unload "$HOME/Library/LaunchAgents/com.chati.ailocal.plist" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/com.chati.ailocal.plist"
+    ok "Autostart agent removed"
 
     step "Removing installed apps and state"
     rm -rf "$HOME/openwebui" "$HOME/searxng" "$HOME/logs"

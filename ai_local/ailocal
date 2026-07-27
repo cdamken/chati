@@ -583,14 +583,77 @@ Backup (ONE slot — the state before the last upgrade/backup):
   backup                      Snapshot now, replacing the previous one
   restore [--yes]             Go back to the snapshot (--yes skips confirm)
 
+Autostart (start all services automatically at login):
+  autostart on                Install a LaunchAgent that runs 'ailocal start' at login
+  autostart off               Remove it
+  autostart status            Show whether it's enabled
+
 Environment:
   WEBUI_START_TIMEOUT   Seconds to wait for startup (default 180).
   AILOCAL_NO_OPEN       Set to skip opening the browser on start.
 EOF
 }
 
+# --- Autostart: run `ailocal start` at login via a macOS LaunchAgent ---------
+# The agent runs `ailocal start` through a login+interactive zsh (`-lic`) so the
+# same environment as your terminal applies — e.g. an OLLAMA_HOST=0.0.0.0 in
+# ~/.zshrc makes the services come up LAN-exposed at login too. On a plain
+# install (no such env) it just starts them on localhost.
+AUTOSTART_LABEL="com.chati.ailocal"
+AUTOSTART_PLIST="$HOME/Library/LaunchAgents/$AUTOSTART_LABEL.plist"
+
+autostart_cmd() {
+    local action="${1:-status}"
+    case "$action" in
+        on|enable)
+            mkdir -p "$(dirname "$AUTOSTART_PLIST")" "$LOG_DIR"
+            cat > "$AUTOSTART_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$AUTOSTART_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lic</string>
+        <string>ailocal start</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>StandardOutPath</key><string>$LOG_DIR/autostart.log</string>
+    <key>StandardErrorPath</key><string>$LOG_DIR/autostart.log</string>
+</dict>
+</plist>
+PLIST
+            launchctl bootout "gui/$(id -u)/$AUTOSTART_LABEL" 2>/dev/null
+            if launchctl bootstrap "gui/$(id -u)" "$AUTOSTART_PLIST" 2>/dev/null \
+               || launchctl load "$AUTOSTART_PLIST" 2>/dev/null; then
+                echo "Autostart ENABLED — Ollama, OpenWebUI and SearXNG will start at login."
+                echo "  (plist: $AUTOSTART_PLIST · log: $LOG_DIR/autostart.log)"
+            else
+                echo "Autostart plist written; launchctl load failed but it will run at next login."
+            fi
+            ;;
+        off|disable)
+            launchctl bootout "gui/$(id -u)/$AUTOSTART_LABEL" 2>/dev/null \
+                || launchctl unload "$AUTOSTART_PLIST" 2>/dev/null
+            rm -f "$AUTOSTART_PLIST"
+            echo "Autostart DISABLED (services already running are left alone)."
+            ;;
+        status)
+            if [[ -f "$AUTOSTART_PLIST" ]]; then
+                echo "Autostart: ENABLED  ($AUTOSTART_PLIST)"
+            else
+                echo "Autostart: disabled  (enable with: ailocal autostart on)"
+            fi
+            ;;
+        *) echo "Usage: ailocal autostart on|off|status"; return 1 ;;
+    esac
+}
+
 case "$1" in
     status)  status ;;
+    autostart) autostart_cmd "$2" ;;
     start)   start_target "$2" ;;
     stop)    stop_target "$2" ;;
     restart) restart_target "$2" ;;

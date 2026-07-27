@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.3.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.4.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -273,6 +273,18 @@ One backup slot, by design: it always holds the state before the last upgrade (o
 ```
 
 The slot lives at `~/openwebui_backups/previous/` and includes the database (consistent `sqlite3 .backup` snapshot), the data directory and the secret key.
+
+### Auto-start at login
+
+By default the services only run when you start them (`ailocal start`, or `chati`/`setup.sh`). To have Ollama + OpenWebUI + SearXNG come up **automatically every time you log in**, install a LaunchAgent:
+
+```bash
+ailocal autostart on       # start all services at login
+ailocal autostart status   # is it enabled?
+ailocal autostart off      # remove it
+```
+
+The agent runs `ailocal start` through a login shell, so your terminal environment applies — e.g. if you set `OLLAMA_HOST=0.0.0.0:11434` in `~/.zshrc` (to reach Ollama from other computers on your LAN), auto-started services honor it too. Output goes to `~/logs/autostart.log`. `./setup.sh --remove-all` removes the agent.
 
 ### Logs
 
