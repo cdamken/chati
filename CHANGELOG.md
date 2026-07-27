@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.5.0] - 2026-07-22
+
+### Changed
+- **Agent Mode is now a whitelist, not a prompt-for-everything gate.** Clearly
+  read-only commands (`ls`, `cat`, `grep`, `find`, `ps`, `git status`,
+  `brew list`, `ollama list`, … with no pipes/redirects/`$()`) run without a
+  prompt; anything that could modify files/processes/network/system — or any
+  composed command — shows a warning and still asks `Execute? (y/N)` (denied by
+  default). Deny-by-default is preserved: anything unrecognized asks first, and
+  composition/redirection/substitution always prompts (so `ls; rm -rf ~` can't
+  slip through). `CHATI_AGENT_CONFIRM=all` restores confirm-everything. New unit
+  tests cover the safe/risky classification.
+
 ## [1.4.0] - 2026-07-22
 
 ### Added

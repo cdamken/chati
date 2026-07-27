@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.4.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.5.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -400,7 +400,7 @@ Each instance keeps its own active session, buffer, `/back` pointer and command 
 ### Mode Toggles
 - `/talk` (`/t`): Toggle auto-speech.
 - `/web` (`/w`): Toggle web research. **Honest about availability**: turning it on first preflights the (external) SearXNG backend — if you're offline, the server is down, or credentials are wrong, it says so plainly and stays OFF instead of pretending. **Smart when on**: a router decides per message whether the question actually needs live data. A joke, a coding question or an explanation is answered directly (no search); prices, news, "latest" or recent data trigger a SearXNG search + RAG. The router automatically uses a small installed model for a snappy decision (preference list baked into `lib_chat.sh`, matched against `ollama list`; falls back to the active model) — no per-machine config needed. `WEB_AUTO=0` disables triage (always search); `WEB_ROUTER_MODEL` pins a specific router model.
-- `/agent` (`/a`): Toggle Agent Mode — let the AI propose shell commands to run on your Mac. Each command asks for `Y/n` confirmation before executing.
+- `/agent` (`/a`): Toggle Agent Mode — let the AI propose shell commands to run on your Mac. **Clearly read-only commands** (`ls`, `cat`, `grep`, `find`, `ps`, `git status`, `brew list`, …, with no pipes/redirects/`$()`) run **without a prompt**. Anything that could modify files, processes, network or system — or any composed command — shows a **warning and asks `Execute? (y/N)`**, denied by default unless you type `y`. It's a **whitelist**, not a blacklist: anything unrecognized asks first. Set `CHATI_AGENT_CONFIRM=all` to confirm *every* command (the classic behavior).
 
 ### File & Batch
 - `/file` (`/f`) `<file> [msg]`: Send an entire file with an optional instruction.

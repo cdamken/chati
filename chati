@@ -184,6 +184,40 @@ agent_confirmed() {
     [[ "$1" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
+# Decide whether an agent command is a clearly READ-ONLY operation (search /
+# show / list) that can run WITHOUT the Execute? prompt. Deny-by-default:
+# return 0 (safe) ONLY for a known read-only command with no shell composition;
+# everything else returns 1 so the caller prompts. Better to ask about a safe
+# command than to auto-run a risky one. A whitelist, never a blacklist —
+# because anything unanticipated must ask, not run.
+agent_cmd_is_safe() {
+    local cmd="$1"
+    # Any chaining / redirection / substitution can hide side effects
+    # (`ls; rm -rf ~`, `cat >f`, `echo $(rm x)`, `x | sh`) → always prompt.
+    case "$cmd" in
+        *'|'*|*';'*|*'>'*|*'<'*|*'`'*|*'$('*|*'&'*) return 1 ;;
+    esac
+    # `find` with a mutating action is not read-only.
+    case " $cmd " in
+        *' -delete '*|*' -exec '*|*' -execdir '*|*' -ok '*|*' -okdir '*) return 1 ;;
+    esac
+    local first second
+    read -r first second _ <<< "$cmd"
+    first="${first##*/}"     # /bin/ls → ls
+    case "$first" in
+        ls|pwd|cat|head|tail|wc|stat|file|echo|printf|date|cal|whoami|id|hostname|\
+        uname|uptime|df|du|which|type|basename|dirname|realpath|readlink|env|\
+        grep|egrep|fgrep|rg|find|pgrep|ps|jq|sw_vers|arch|tty|locale)
+            return 0 ;;
+        sysctl)   [[ "$cmd" != *' -w'* ]] && return 0 ;;
+        defaults) [[ "$second" == read || "$second" == read-type || "$second" == domains ]] && return 0 ;;
+        git)      case "$second" in status|log|diff|show|branch|remote|tag|describe|blame|shortlog) return 0 ;; esac ;;
+        brew)     case "$second" in list|info|deps|outdated|home|config|--version|--prefix) return 0 ;; esac ;;
+        ollama)   case "$second" in list|show|ps|--version) return 0 ;; esac ;;
+    esac
+    return 1
+}
+
 # Speak the given text via macOS `say` using auto-detected voice + current
 # colors/rate. Does nothing if VOICE_MODE is off or the text is empty.
 # --interactive prints the text with word-by-word highlight as it's spoken,
@@ -682,10 +716,13 @@ Mode Toggles:
                         \$WEB_CACHE_DIR/turn.* and is wiped automatically
                         once the answer lands.
 /agent (/a)             Toggle Agent Mode — allow the AI to propose
-                        shell commands to run on your Mac. Every command
-                        pops up an "Execute? (y/N)" confirmation before
-                        it runs, so nothing happens without your
-                        approval. Off by default.
+                        shell commands to run on your Mac. Read-only
+                        commands (ls, cat, grep, find, ps…) run directly;
+                        anything that could modify files, processes,
+                        network or system shows a warning and asks
+                        "Execute? (y/N)" — denied unless you type y.
+                        Set CHATI_AGENT_CONFIRM=all to confirm every
+                        command. Off by default.
 
 Configuration:
 --------------
@@ -904,7 +941,8 @@ while true; do
                 else
                     AGENT_MODE="ON"
                     echo "🛠️  Agent Mode: ON — AI may now propose shell commands on your Mac."
-                    echo "    Each command will ask 'Execute? (y/N)' before running."
+                    echo "    Read-only commands run directly; anything that could change"
+                    echo "    files/processes/network/system warns + asks 'Execute? (y/N)'."
                 fi ;;
             /web|/w)
                 if [[ "$WEB_MODE" == "ON" ]]; then
@@ -1014,12 +1052,21 @@ while true; do
         # Autonomous tool-use loop.
         if [[ "$AGENT_MODE" == "ON" ]] && agent_cmd=$(extract_exec_cmd "$LAST_RESPONSE"); then
             echo "🐚 AI Action: $agent_cmd"
-            # Deny by default: ONLY an explicit y/Y runs the command.
-            # Enter, "no", a fat-finger, anything else → cancel. The old
-            # gate ran on everything except exactly n/N, so a reflex Enter
-            # over [EXEC: rm -rf ...] would have executed it.
-            read -rp "✅ Execute? (y/N): " confirm
-            if agent_confirmed "$confirm"; then
+            # Whitelist gate: clearly read-only commands (search / show / list,
+            # no pipes/redirects/substitution) run without a prompt. Everything
+            # else still needs an explicit y/Y — deny by default — and shows a
+            # warning first. Set CHATI_AGENT_CONFIRM=all to confirm EVERYTHING
+            # (the classic behaviour).
+            run_it=0
+            if [[ "${CHATI_AGENT_CONFIRM:-}" != "all" ]] && agent_cmd_is_safe "$agent_cmd"; then
+                echo "   ✅ read-only — running without confirmation"
+                run_it=1
+            else
+                echo "   ⚠️  This may modify files, processes, network or system — review it."
+                read -rp "✅ Execute? (y/N): " confirm
+                agent_confirmed "$confirm" && run_it=1
+            fi
+            if [[ "$run_it" == 1 ]]; then
                 # </dev/null: don't let the command read the REPL's stdin
                 # (an interactive tool in $agent_cmd would otherwise eat
                 # the user's next prompt / hang the loop).
