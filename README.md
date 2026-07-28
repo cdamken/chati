@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.6.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.7.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -35,7 +35,7 @@ cd ~/chat
 - 🌐 **Browser UI:** already running at **http://127.0.0.1:8888**
 - 🔎 **Web search:** local SearXNG is running and wired in — toggle it inside chati with `/web`
 
-> The installer **detects your Mac's memory and picks a model that fits**: **≥32 GB → `gemma4:26b`** (~17 GB, the target), 16–31 GB → `llama3.1:8b-instruct-q8_0`, <16 GB → `gemma3:4b`. Force any model with `./setup.sh --model NAME`, or switch live in chati with `/model`.
+> The installer **detects your Mac's memory and picks a model that fits**: **≥32 GB → `gemma4:26b`** (~17 GB, the active default) **and also pulls `gemma4:31b`** (~19 GB, dense/max-quality) as a second option; 16–31 GB → `llama3.1:8b-instruct-q8_0`; <16 GB → `gemma3:4b`. Force a single model with `./setup.sh --model NAME`, or switch live in chati with `/model`.
 >
 > **CLI only?** `./setup.sh --minimal` skips the browser app and SearXNG. **Undo everything?** `./setup.sh --remove-all` (see [Uninstalling](#uninstalling-remove-all)).
 >
@@ -152,11 +152,13 @@ chati
 
 > **Model note:** `setup.sh` detects unified memory and selects a model that fits, then points chati at it:
 >
-> | Unified RAM | Model | Size |
+> | Unified RAM | Model(s) pulled | Size |
 > |---|---|---|
-> | ≥ 32 GB | `gemma4:26b` | ~17 GB |
+> | ≥ 32 GB | `gemma4:26b` (active) **+** `gemma4:31b` | ~17 GB + ~19 GB |
 > | 16–31 GB | `llama3.1:8b-instruct-q8_0` | ~8.5 GB |
 > | < 16 GB | `gemma3:4b` | ~3.3 GB |
+>
+> On a ≥32 GB Mac both Gemma 4 models are pulled: `gemma4:26b` (MoE, fast, the active default) and `gemma4:31b` (dense, highest quality) — switch between them with `/model`.
 >
 > Force a specific model with `./setup.sh --model NAME` (e.g. `llama3.3:70b` on a high-RAM Mac). If the configured model isn't installed (e.g. after switching machines), chati **auto-falls-back** to an installed model instead of failing every message — pick any model anytime with `/model`. For a faster `/web` triage router, also pull a small model: `ollama pull llama3.2:3b`.
 
@@ -284,7 +286,21 @@ ailocal autostart status   # is it enabled?
 ailocal autostart off      # remove it
 ```
 
-The agent runs `ailocal start` through a login shell, so your terminal environment applies — e.g. if you set `OLLAMA_HOST=0.0.0.0:11434` in `~/.zshrc` (to reach Ollama from other computers on your LAN), auto-started services honor it too. Output goes to `~/logs/autostart.log`. `./setup.sh --remove-all` removes the agent.
+The agent runs `ailocal start` through a login shell. Output goes to `~/logs/autostart.log`. `./setup.sh --remove-all` removes the agent.
+
+### Reaching Ollama from other computers (LAN)
+
+By default Ollama listens on `127.0.0.1` (this Mac only). To let other machines on your network use it:
+
+```bash
+ailocal lan on       # expose the Ollama API on 0.0.0.0
+ailocal lan status   # show current exposure + bind address
+ailocal lan off      # back to localhost only
+```
+
+`lan on` sets `OLLAMA_HOST` via `launchctl setenv` (so the whole login session — terminal **and** the autostart agent — sees it) and persists the choice, so it survives reboots. It then prints the address to use from another computer, e.g. `http://192.168.1.42:11434` (on that machine: `export OLLAMA_API=http://<this-mac-ip>:11434`, or point any app there).
+
+> ⚠️ **Ollama has no authentication.** Anyone who can reach the port can use or delete your models — only enable this on a trusted network. If your IP is assigned by DHCP it may change; reserve it in your router for a stable address. (This exposes only Ollama; OpenWebUI/SearXNG stay localhost.)
 
 ### Logs
 

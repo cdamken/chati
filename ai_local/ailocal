@@ -9,6 +9,7 @@ AILOCAL_VERSION="3.0.0"
 LOG_DIR="$HOME/logs"
 LOG_FILE="$LOG_DIR/ailocal.log"
 UPGRADE_LOG="$LOG_DIR/ailocal_upgrade.log"
+LAN_MARKER="$HOME/.config/chati/ollama_lan"   # 'ailocal lan on' writes this
 OPENWEBUI_DIR="$HOME/openwebui"
 OPENWEBUI_DATA_DIR="$OPENWEBUI_DIR/data"
 OPENWEBUI_VENV="$OPENWEBUI_DIR/.venv"
@@ -252,6 +253,12 @@ startollama() {
     # Override by exporting these before starting.
     export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
     export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
+    # LAN exposure (persisted via `ailocal lan on`): bind all interfaces so
+    # other machines can reach Ollama. The marker makes it survive reboots.
+    if [[ -f "$LAN_MARKER" ]]; then
+        export OLLAMA_HOST="${OLLAMA_HOST:-$(cat "$LAN_MARKER" 2>/dev/null || echo 0.0.0.0:11434)}"
+        launchctl setenv OLLAMA_HOST "$OLLAMA_HOST" 2>/dev/null || true
+    fi
     nohup ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
     echo "Ollama started. Logs at $LOG_DIR/ollama.log"
 }
@@ -588,6 +595,11 @@ Autostart (start all services automatically at login):
   autostart off               Remove it
   autostart status            Show whether it's enabled
 
+LAN (reach the Ollama API from other computers — trusted networks only):
+  lan on                      Expose Ollama on 0.0.0.0 (launchctl setenv + persist)
+  lan off                     Back to localhost only
+  lan status                  Show current exposure and bind address
+
 Environment:
   WEBUI_START_TIMEOUT   Seconds to wait for startup (default 180).
   AILOCAL_NO_OPEN       Set to skip opening the browser on start.
@@ -651,9 +663,44 @@ PLIST
     esac
 }
 
+# --- LAN exposure: make the Ollama API reachable from other machines --------
+# Uses `launchctl setenv OLLAMA_HOST` so the whole login session sees it
+# (terminal, autostart agent, everything) — more reliable than a per-shell
+# export. A marker file persists the choice across reboots (startollama
+# re-applies it). Ollama has NO authentication — only expose on a trusted LAN.
+lan_cmd() {
+    local action="${1:-status}" host="0.0.0.0:11434" ip bind
+    case "$action" in
+        on|enable)
+            mkdir -p "$(dirname "$LAN_MARKER")"; printf '%s\n' "$host" > "$LAN_MARKER"
+            launchctl setenv OLLAMA_HOST "$host" 2>/dev/null || true
+            export OLLAMA_HOST="$host"
+            restart_target ollama >/dev/null 2>&1
+            ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+            echo "🌐 Ollama LAN exposure: ON — reachable at http://${ip:-<this-mac-ip>}:11434"
+            echo "   ⚠️  Ollama has no authentication — only do this on a trusted network."
+            ;;
+        off|disable)
+            rm -f "$LAN_MARKER"
+            launchctl unsetenv OLLAMA_HOST 2>/dev/null || true
+            unset OLLAMA_HOST
+            restart_target ollama >/dev/null 2>&1
+            echo "🔒 Ollama LAN exposure: OFF — localhost only."
+            ;;
+        status)
+            if [[ -f "$LAN_MARKER" ]]; then echo "Ollama LAN exposure: ON  ($(cat "$LAN_MARKER"))"
+            else echo "Ollama LAN exposure: OFF (localhost only)"; fi
+            bind=$(lsof -nP -iTCP:11434 -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print $9; exit}')
+            echo "  currently listening on: ${bind:-not running}"
+            ;;
+        *) echo "Usage: ailocal lan on|off|status"; return 1 ;;
+    esac
+}
+
 case "$1" in
     status)  status ;;
     autostart) autostart_cmd "$2" ;;
+    lan)     lan_cmd "$2" ;;
     start)   start_target "$2" ;;
     stop)    stop_target "$2" ;;
     restart) restart_target "$2" ;;

@@ -271,10 +271,14 @@ installed_models() { ollama list 2>/dev/null | tail -n +2 | awk '{print $1}'; }
 have_any_model() { [[ -n "$(installed_models)" ]]; }
 
 # Pick a model sized for this Mac's memory, unless the user forced --model.
+EXTRA_MODELS=""
 if [[ "$MODEL_EXPLICIT" -ne 1 ]]; then
     RAM_GB=$(detect_ram_gb)
     CHAT_MODEL="$(recommend_model "$RAM_GB")"
     ok "Detected ${RAM_GB} GB unified memory → selected model: $CHAT_MODEL"
+    # On a Mac that fits gemma4:26b, also pull gemma4:31b (dense, max-quality)
+    # as a second option alongside the faster 26b MoE. ~19 GB extra.
+    [[ "$CHAT_MODEL" == "gemma4:26b" ]] && EXTRA_MODELS="gemma4:31b"
 fi
 
 if [[ "$WANT_PULL" -eq 0 ]]; then
@@ -296,6 +300,15 @@ else
         printf '%s\n' "$CHAT_MODEL" > "$active_file"
         ok "Set active model → $CHAT_MODEL"
     fi
+    # Also pull any extra models (kept available; active stays $CHAT_MODEL).
+    for _m in $EXTRA_MODELS; do
+        if installed_models | grep -qxF "$_m"; then
+            ok "Extra model '$_m' already present"
+        else
+            warn "Pulling extra model '$_m' (dense, max-quality — a few minutes)…"
+            ollama pull "$_m" && ok "Pulled '$_m'" || warn "Could not pull '$_m' (skipped)"
+        fi
+    done
 fi
 
 # ---- 8. SearXNG web search (default; skip with --no-searxng/--minimal) -------

@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.7.0] - 2026-07-22
+
+### Added
+- **`ailocal lan on|off|status`** — expose the Ollama API to other computers.
+  `on` sets `OLLAMA_HOST=0.0.0.0:11434` via `launchctl setenv` (seen by the
+  whole login session, incl. the autostart agent) and persists it in a marker
+  so it survives reboots (`startollama` re-applies it); prints the LAN address.
+  Replaces the fragile `~/.zshrc` export, which didn't reliably reach the
+  auto-started Ollama. `off` returns to localhost. Ollama has no auth — LAN only.
+- On a ≥32 GB Mac, `setup.sh` now also pulls **`gemma4:31b`** (~19 GB, dense,
+  max-quality) alongside the active `gemma4:26b` (MoE). Switch with `/model`.
+
 ## [1.6.1] - 2026-07-22
 
 ### Changed
