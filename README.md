@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.7.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.8.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -307,6 +307,18 @@ export OLLAMA_API=http://your-mac.your-tailnet.ts.net:11434
 ```
 
 > ⚠️ **Ollama has no authentication.** On the raw LAN, anyone who can reach the port can use or delete your models — only enable on a trusted network, or rely on Tailscale (private, your devices only). This exposes only Ollama; OpenWebUI/SearXNG stay localhost.
+
+### Keeping a server Mac awake
+
+A Mac that sleeps stops answering — even over Tailscale — so a machine you use as a shared Ollama endpoint should stay awake while it serves. Ollama can look "alive" (`/api/tags` responds) yet return **empty generations** when the Mac is in low-power sleep; keeping it awake fixes that.
+
+```bash
+ailocal awake on       # prevent idle sleep (caffeinate) while serving
+ailocal awake status
+ailocal awake off      # restore normal sleep
+```
+
+It uses `caffeinate` (no `sudo`) and is persisted, so `ailocal start` / autostart re-arm it after a reboot. For a headless always-on server you can instead disable sleep at the system level: `sudo pmset -c sleep 0 disablesleep 1` (Mac plugged in).
 
 ### Logs
 

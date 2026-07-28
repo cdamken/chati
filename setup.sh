@@ -175,6 +175,12 @@ remove_all() {
     rm -f "$HOME/Library/LaunchAgents/com.chati.ailocal.plist"
     ok "Autostart agent removed"
 
+    step "Clearing LAN exposure and keep-awake"
+    launchctl unsetenv OLLAMA_HOST 2>/dev/null || true
+    _cf=$(cat "$HOME/.config/chati/caffeinate.pid" 2>/dev/null) && [[ -n "$_cf" ]] && kill "$_cf" 2>/dev/null || true
+    rm -rf "$HOME/.config/chati"
+    ok "LAN env + caffeinate + chati config cleared"
+
     step "Removing installed apps and state"
     rm -rf "$HOME/openwebui" "$HOME/searxng" "$HOME/logs"
     rm -rf "$REPO_ROOT/.env" "$REPO_ROOT/.active_ollama_model.txt" \

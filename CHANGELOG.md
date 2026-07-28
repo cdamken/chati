@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.8.0] - 2026-07-28
+
+### Added
+- **`ailocal awake on|off|status`** — keep the Mac from idle-sleeping while it
+  serves, so a shared Ollama endpoint stays reachable over LAN/Tailscale. Uses
+  `caffeinate` (no sudo), persisted via a marker and re-armed by `ailocal start`
+  / autostart. Fixes the "Ollama alive but returns empty generations" symptom
+  that happens when the host is in low-power sleep. `--remove-all` cleans it up
+  (plus the LAN `launchctl setenv` and `~/.config/chati`).
+
 ## [1.7.1] - 2026-07-22
 
 ### Added

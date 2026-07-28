@@ -10,6 +10,8 @@ LOG_DIR="$HOME/logs"
 LOG_FILE="$LOG_DIR/ailocal.log"
 UPGRADE_LOG="$LOG_DIR/ailocal_upgrade.log"
 LAN_MARKER="$HOME/.config/chati/ollama_lan"   # 'ailocal lan on' writes this
+AWAKE_MARKER="$HOME/.config/chati/keep_awake" # 'ailocal awake on' writes this
+AWAKE_PIDFILE="$HOME/.config/chati/caffeinate.pid"
 OPENWEBUI_DIR="$HOME/openwebui"
 OPENWEBUI_DATA_DIR="$OPENWEBUI_DIR/data"
 OPENWEBUI_VENV="$OPENWEBUI_DIR/.venv"
@@ -330,7 +332,50 @@ stopsearxng() {
     echo "SearXNG stopped (forced)"
 }
 
+# --- Keep-awake: stop the Mac idle-sleeping while it serves, so Ollama stays
+# reachable over LAN/Tailscale. Uses `caffeinate` (no sudo). Persisted via a
+# marker so `ailocal start`/autostart re-arm it and it survives reboots.
+awake_running() {
+    local p; p=$(cat "$AWAKE_PIDFILE" 2>/dev/null) || return 1
+    [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null && [[ "$(ps -o comm= -p "$p" 2>/dev/null)" == *caffeinate* ]]
+}
+start_caffeinate() {
+    awake_running && return 0
+    mkdir -p "$(dirname "$AWAKE_PIDFILE")"
+    nohup caffeinate -i >/dev/null 2>&1 &
+    echo "$!" > "$AWAKE_PIDFILE"
+}
+stop_caffeinate() {
+    local p; p=$(cat "$AWAKE_PIDFILE" 2>/dev/null)
+    [[ -n "$p" ]] && kill "$p" 2>/dev/null
+    rm -f "$AWAKE_PIDFILE"
+}
+ensure_awake() { [[ -f "$AWAKE_MARKER" ]] && start_caffeinate; }
+
+awake_cmd() {
+    case "${1:-status}" in
+        on|enable)
+            mkdir -p "$(dirname "$AWAKE_MARKER")"; : > "$AWAKE_MARKER"
+            start_caffeinate
+            echo "☕ Keep-awake: ON — this Mac won't idle-sleep while serving."
+            echo "   Re-armed automatically by 'ailocal start' / autostart."
+            ;;
+        off|disable)
+            rm -f "$AWAKE_MARKER"; stop_caffeinate
+            echo "😴 Keep-awake: OFF — normal sleep behavior restored."
+            ;;
+        status)
+            if [[ -f "$AWAKE_MARKER" ]]; then
+                awake_running && echo "Keep-awake: ON (caffeinate running)" \
+                              || echo "Keep-awake: ON (enabled; not running — run 'ailocal start')"
+            else echo "Keep-awake: OFF"; fi
+            ;;
+        *) echo "Usage: ailocal awake on|off|status"; return 1 ;;
+    esac
+}
+
 start_target() {
+    ensure_awake   # re-arm keep-awake if the user enabled it
     case "${1:-all}" in
         ollama)  startollama ;;
         webui)   startwebui ;;
@@ -600,6 +645,11 @@ LAN (reach the Ollama API from other computers — trusted networks only):
   lan off                     Back to localhost only
   lan status                  Show current exposure and bind address
 
+Keep-awake (stay reachable — stop the Mac idle-sleeping while it serves):
+  awake on                    Prevent idle sleep via caffeinate (persisted)
+  awake off                   Restore normal sleep
+  awake status                Show whether it's enabled
+
 Environment:
   WEBUI_START_TIMEOUT   Seconds to wait for startup (default 180).
   AILOCAL_NO_OPEN       Set to skip opening the browser on start.
@@ -720,6 +770,7 @@ case "$1" in
     status)  status ;;
     autostart) autostart_cmd "$2" ;;
     lan)     lan_cmd "$2" ;;
+    awake)   awake_cmd "$2" ;;
     start)   start_target "$2" ;;
     stop)    stop_target "$2" ;;
     restart) restart_target "$2" ;;
