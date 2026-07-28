@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.8.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.8.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -318,7 +318,7 @@ ailocal awake status
 ailocal awake off      # restore normal sleep
 ```
 
-It uses `caffeinate` (no `sudo`) and is persisted, so `ailocal start` / autostart re-arm it after a reboot. For a headless always-on server you can instead disable sleep at the system level: `sudo pmset -c sleep 0 disablesleep 1` (Mac plugged in).
+It uses `caffeinate -s` (no `sudo`), which prevents sleep **only while on AC power** — so a laptop on battery still sleeps normally and won't drain. It's persisted, so `ailocal start` / autostart re-arm it after a reboot; `awake off` stops it. For a headless always-on server you can instead disable sleep at the system level: `sudo pmset -c sleep 0 disablesleep 1` (Mac plugged in).
 
 ### Logs
 

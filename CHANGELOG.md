@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.8.1] - 2026-07-28
+
+### Changed
+- Keep-awake now uses `caffeinate -s` instead of `-i`: it prevents sleep **only
+  while on AC power**, so a laptop on battery sleeps normally and doesn't drain.
+  (`awake on|off|status` unchanged.)
+
 ## [1.8.0] - 2026-07-28
 
 ### Added
