@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.7.1] - 2026-07-22
+
+### Added
+- `ailocal lan on` / `lan status` now also show the machine's **Tailscale
+  MagicDNS address** (e.g. `http://host.tailnet.ts.net:11434`) when Tailscale
+  is up. Because LAN mode binds `0.0.0.0`, Ollama is reachable over Tailscale
+  too — and the MagicDNS name is stable across IP changes, so it's the
+  recommended way to reach it from other machines. README updated.
+
 ## [1.7.0] - 2026-07-22
 
 ### Added

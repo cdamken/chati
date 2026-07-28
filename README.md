@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.7.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.7.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -298,9 +298,15 @@ ailocal lan status   # show current exposure + bind address
 ailocal lan off      # back to localhost only
 ```
 
-`lan on` sets `OLLAMA_HOST` via `launchctl setenv` (so the whole login session — terminal **and** the autostart agent — sees it) and persists the choice, so it survives reboots. It then prints the address to use from another computer, e.g. `http://192.168.1.42:11434` (on that machine: `export OLLAMA_API=http://<this-mac-ip>:11434`, or point any app there).
+`lan on` sets `OLLAMA_HOST=0.0.0.0` via `launchctl setenv` (so the whole login session — terminal **and** the autostart agent — sees it) and persists the choice in `~/.config/chati/ollama_lan`, so **every `ailocal start` (including autostart at login) brings Ollama up exposed** until you run `lan off`. It binds *all* interfaces, so it's reachable both on the LAN and over **Tailscale** — and `lan on`/`lan status` print both addresses.
 
-> ⚠️ **Ollama has no authentication.** Anyone who can reach the port can use or delete your models — only enable this on a trusted network. If your IP is assigned by DHCP it may change; reserve it in your router for a stable address. (This exposes only Ollama; OpenWebUI/SearXNG stay localhost.)
+**On Tailscale? Use the MagicDNS name — it's the robust choice.** Binding `0.0.0.0` is immune to IP changes, and connecting by the Tailscale name (e.g. `http://your-mac.your-tailnet.ts.net:11434`) is stable even if the IP changes. It also means access is private and encrypted, limited to your own devices — a good answer to Ollama having no auth. On the client machine:
+
+```bash
+export OLLAMA_API=http://your-mac.your-tailnet.ts.net:11434
+```
+
+> ⚠️ **Ollama has no authentication.** On the raw LAN, anyone who can reach the port can use or delete your models — only enable on a trusted network, or rely on Tailscale (private, your devices only). This exposes only Ollama; OpenWebUI/SearXNG stay localhost.
 
 ### Logs
 

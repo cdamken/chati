@@ -668,8 +668,20 @@ PLIST
 # (terminal, autostart agent, everything) — more reliable than a per-shell
 # export. A marker file persists the choice across reboots (startollama
 # re-applies it). Ollama has NO authentication — only expose on a trusted LAN.
+# Stable Tailscale address for this machine (MagicDNS name if available — it
+# survives IP changes — otherwise the 100.x IP). Empty if Tailscale isn't up.
+tailscale_host() {
+    command -v tailscale >/dev/null 2>&1 || return 1
+    local name=""
+    if command -v jq >/dev/null 2>&1; then
+        name=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//')
+    fi
+    [[ -n "$name" ]] && { printf '%s\n' "$name"; return 0; }
+    tailscale ip -4 2>/dev/null | head -1
+}
+
 lan_cmd() {
-    local action="${1:-status}" host="0.0.0.0:11434" ip bind
+    local action="${1:-status}" host="0.0.0.0:11434" ip bind ts
     case "$action" in
         on|enable)
             mkdir -p "$(dirname "$LAN_MARKER")"; printf '%s\n' "$host" > "$LAN_MARKER"
@@ -678,7 +690,10 @@ lan_cmd() {
             restart_target ollama >/dev/null 2>&1
             ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
             echo "🌐 Ollama LAN exposure: ON — reachable at http://${ip:-<this-mac-ip>}:11434"
-            echo "   ⚠️  Ollama has no authentication — only do this on a trusted network."
+            ts=$(tailscale_host) && [[ -n "$ts" ]] && \
+                echo "   🔒 Via Tailscale (stable, recommended): http://$ts:11434"
+            echo "   ⚠️  Ollama has no authentication — expose only on a trusted network,"
+            echo "       or reach it over Tailscale (private, encrypted, your devices only)."
             ;;
         off|disable)
             rm -f "$LAN_MARKER"
@@ -692,6 +707,10 @@ lan_cmd() {
             else echo "Ollama LAN exposure: OFF (localhost only)"; fi
             bind=$(lsof -nP -iTCP:11434 -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print $9; exit}')
             echo "  currently listening on: ${bind:-not running}"
+            ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+            [[ -n "$ip" ]] && echo "  LAN address:       http://$ip:11434"
+            ts=$(tailscale_host) && [[ -n "$ts" ]] && \
+                echo "  Tailscale address: http://$ts:11434  (stable — use this)"
             ;;
         *) echo "Usage: ailocal lan on|off|status"; return 1 ;;
     esac
