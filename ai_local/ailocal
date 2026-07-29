@@ -200,8 +200,11 @@ startwebui() {
     fi
 
     log "Starting OpenWebUI..."
+    # </dev/null so we don't hold the caller's stdin/pipe open — otherwise a
+    # non-interactive `ailocal start | tail` (scripts, CI, agents) never sees
+    # EOF and hangs even though the service is up. (Matches startsearxng.)
     nohup "$OPENWEBUI_VENV/bin/open-webui" serve --host "$WEBUI_HOST" --port "$WEBUI_PORT" \
-        > "$LOG_DIR/webui.log" 2>&1 &
+        </dev/null > "$LOG_DIR/webui.log" 2>&1 &
 
     echo -n "Waiting for OpenWebUI to start (up to ${WEBUI_START_TIMEOUT}s)"
     local i
@@ -261,7 +264,9 @@ startollama() {
         export OLLAMA_HOST="${OLLAMA_HOST:-$(cat "$LAN_MARKER" 2>/dev/null || echo 0.0.0.0:11434)}"
         launchctl setenv OLLAMA_HOST "$OLLAMA_HOST" 2>/dev/null || true
     fi
-    nohup ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
+    # </dev/null: don't hold the caller's stdin/pipe open (see startwebui) —
+    # keeps `ailocal start` from hanging when run non-interactively/piped.
+    nohup ollama serve </dev/null > "$LOG_DIR/ollama.log" 2>&1 &
     echo "Ollama started. Logs at $LOG_DIR/ollama.log"
 }
 

@@ -60,6 +60,31 @@ SAY_SPEED=1.0            # Speech speed multiplier (1.0 = 200 wpm)
 SAY_RATE=200             # Calculated words per minute
 VALID_LANG_CODES=("auto" "en" "es" "de" "fr" "pt" "it" "ru" "ja" "ko" "zh" "ar" "hi")
 
+# --- Chat text colors (distinct from SAY_COLORS, which is TTS highlighting) ---
+# Colour what YOU type vs what the AI answers, so a long transcript is easy to
+# scan. Names map to ANSI SGR codes; "default" = the terminal's own color (no
+# code). Configure per-machine via CHATI_USER_COLOR / CHATI_AI_COLOR (env), or
+# live with /color. Emits nothing for unknown names, so it degrades safely.
+ansi_color() {
+    case "$1" in
+        black)     printf '\033[30m' ;;
+        red)       printf '\033[31m' ;;
+        green)     printf '\033[32m' ;;
+        yellow)    printf '\033[33m' ;;
+        blue)      printf '\033[34m' ;;
+        magenta)   printf '\033[35m' ;;
+        cyan)      printf '\033[36m' ;;
+        white)     printf '\033[37m' ;;
+        gray|grey) printf '\033[90m' ;;
+        default|*) printf '' ;;   # terminal default / unknown → no color
+    esac
+}
+RESET_COLOR=$(printf '\033[0m')
+USER_COLOR_NAME="${CHATI_USER_COLOR:-cyan}"
+AI_COLOR_NAME="${CHATI_AI_COLOR:-default}"
+USER_COLOR=$(ansi_color "$USER_COLOR_NAME")
+AI_COLOR=$(ansi_color "$AI_COLOR_NAME")
+
 update_say_rate() {
     SAY_RATE=$(awk -v s="$SAY_SPEED" 'BEGIN { r=s*200; if(r<50)r=50; if(r>600)r=600; print int(r) }')
 }
@@ -246,7 +271,10 @@ send_and_capture() {
     if [[ "$VOICE_MODE" == "ON" ]]; then
         "$CHAT_CMD" "$@" >/dev/null
     else
+        # Colour the streamed answer (reset always, even if it errors out).
+        [[ -n "$AI_COLOR" ]] && printf '%s' "$AI_COLOR"
         "$CHAT_CMD" "$@"
+        [[ -n "$AI_COLOR" ]] && printf '%s' "$RESET_COLOR"
     fi
     LAST_RESPONSE=$(cat "$LAST_RESPONSE_FILE" 2>/dev/null || echo "")
     speak_if_enabled "$LAST_RESPONSE"
@@ -669,6 +697,7 @@ Current Chati Settings:
 🔎 Web:      $WEB_MODE
 🛠️  Agent:    $agent_status
 🗣️  Talk:     $VOICE_MODE (Voice: $DEFAULT_VOICE, Speed: ${SAY_SPEED}x, Colors: $SAY_COLORS)
+🎨 Colors:   you=$USER_COLOR_NAME · ai=$AI_COLOR_NAME  (/color to change)
 📅 Session:  $curr_sess
 🎭 Prompt:   $system_prompt_text
 
@@ -699,8 +728,10 @@ Session Management:
 /autorename [idx|all|all-force]  Let the AI title the session(s).
 /delete <idx|name>      Delete a session.
 
-File & Batch:
--------------
+Input & Files:
+--------------
+/multi (/m)                 Compose a multiline message in \$EDITOR, then send
+                            it (goes through /web, /lang, agent — like normal).
 /file  (/f) <file> [msg]    Send a whole file with an optional instruction.
 /batch (/s) [range] <file>  Batch: send each line of <file> separately.
                             Example: /batch 10-20 Stocks.txt
@@ -743,7 +774,10 @@ Configuration:
 /lang [code]            List or set response language (auto, en, es, …).
 /voice [name]           List or set TTS voice (Samantha, Anna, Paulina, …).
 /speed [mult]           Set speech speed multiplier (0.25 – 3.0).
-/colors [fg/bg]         Set say --interactive colors.
+/colors [fg/bg]         Set say --interactive (TTS highlight) colors.
+/color [user|ai] <name> Set chat TEXT color for your input vs the AI reply
+                        (default black red green yellow blue magenta cyan
+                        white gray). Env: CHATI_USER_COLOR / CHATI_AI_COLOR.
 
 EOF
 }
@@ -785,7 +819,7 @@ ensure_ollama_running() {
     # Apple Silicon perf tuning (see ailocal): flash attention + q8 KV cache.
     export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
     export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
-    nohup ollama serve >"$HOME/logs/ollama.log" 2>&1 &
+    nohup ollama serve </dev/null >"$HOME/logs/ollama.log" 2>&1 &
     # Wait up to ~10s for the API to come up.
     local i
     for i in {1..10}; do
@@ -836,7 +870,12 @@ while true; do
         "$MOLA_CMD" new > /dev/null
     fi
 
+    # Colour what the user types (helps find your own lines in a long
+    # transcript). Emitted around read, not inside the prompt string, so
+    # readline's width math for "> " stays correct.
+    [[ -n "$USER_COLOR" ]] && printf '%s' "$USER_COLOR"
     read -e -rp "> " msg
+    [[ -n "$USER_COLOR" ]] && printf '%s' "$RESET_COLOR"
     [[ -z "$msg" ]] && continue
     history -s "$msg"   # in-memory only; trap flushes on exit
 
@@ -848,7 +887,32 @@ while true; do
             cmd_args=""
         fi
 
+        # Commands normally `continue` the loop. A command that wants its
+        # result treated as a chat message (e.g. /m composing multiline input)
+        # sets _send_after_cmd=1 to fall through to the send path instead.
+        _send_after_cmd=0
+
         case "$cmd_name" in
+            /m|/multi)
+                # Compose a multiline message in $EDITOR, then send it through
+                # the normal path (augment_message + agent loop) — no logic
+                # duplicated. Mirrors /prompt -e's editor handling.
+                editor="${EDITOR:-vi}"
+                if ! command -v "$editor" >/dev/null 2>&1; then
+                    echo "❌ \$EDITOR ($editor) not found. Set EDITOR to a valid command."
+                else
+                    _multi=$(mktemp "${TMPDIR:-/tmp}/chati_multi.XXXXXX")
+                    echo "✍️  Compose your message in $editor — save & quit to send (empty = cancel)."
+                    "$editor" "$_multi"
+                    if [[ -s "$_multi" ]]; then
+                        msg=$(cat "$_multi")
+                        _send_after_cmd=1   # fall through to the send path with $msg
+                    else
+                        echo "⚠️  Message cancelled (empty buffer)."
+                    fi
+                    rm -f "$_multi"
+                fi
+                ;;
             /bye|/exit|/quit|/q)
                 "$MOLA_CMD" save > /dev/null
                 echo "Goodbye!"
@@ -921,6 +985,24 @@ while true; do
                     echo "🎨 Current speech colors: $SAY_COLORS"
                     echo "Available: black, red, green, yellow, blue, magenta, cyan, white"
                     echo "Usage: /colors foreground/background"
+                fi
+                ;;
+            /color)
+                # Chat TEXT colors (user vs AI). Distinct from /colors (TTS).
+                csub="${cmd_args%% *}"; cval=""
+                [[ "$cmd_args" == *" "* ]] && cval="${cmd_args#* }"
+                if [[ -z "$csub" ]]; then
+                    echo "🎨 Chat text colors — you: ${USER_COLOR}${USER_COLOR_NAME}${RESET_COLOR} · AI: ${AI_COLOR}${AI_COLOR_NAME}${RESET_COLOR}"
+                    echo "   Set: /color user <name>   |   /color ai <name>"
+                    echo "   Names: default black red green yellow blue magenta cyan white gray"
+                elif [[ "$csub" == user && -n "$cval" ]]; then
+                    USER_COLOR_NAME="$cval"; USER_COLOR=$(ansi_color "$cval")
+                    echo "✅ Your text color → ${USER_COLOR}${cval}${RESET_COLOR}"
+                elif [[ "$csub" == ai && -n "$cval" ]]; then
+                    AI_COLOR_NAME="$cval"; AI_COLOR=$(ansi_color "$cval")
+                    echo "✅ AI text color → ${AI_COLOR}${cval}${RESET_COLOR}"
+                else
+                    echo "Usage: /color [user|ai] <name>   (run /color to see options)"
                 fi
                 ;;
             /ocr)
@@ -1048,7 +1130,9 @@ while true; do
                 ;;
             *)       echo "❓ Unknown command: $cmd_name." ;;
         esac
-        continue
+        # Fall through to the send path only if a command asked for it
+        # (e.g. /m); every other command loops back for the next prompt.
+        [[ "$_send_after_cmd" == 1 ]] || continue
     fi
 
     # --- Non-command: build the message and send it. ---

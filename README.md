@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.8.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.9.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -437,7 +437,8 @@ Each instance keeps its own active session, buffer, `/back` pointer and command 
 - `/agent` (`/a`): Toggle Agent Mode — let the AI propose shell commands to run on your Mac. **Clearly read-only commands** (`ls`, `cat`, `grep`, `find`, `ps`, `git status`, `brew list`, …, with no pipes/redirects/`$()`) run **without a prompt**. Anything that could modify files, processes, network or system — or any composed command — shows a **warning and asks `Execute? (y/N)`**, denied by default unless you type `y`. It's a **whitelist**, not a blacklist: anything unrecognized asks first. Set `CHATI_AGENT_CONFIRM=all` to confirm *every* command (the classic behavior).
 - `/aY`: Toggle **auto-accept** (capital `Y` on purpose, so it can't happen by accident) — turns Agent Mode on and runs **every** proposed command **without asking**, including destructive ones. Shows a warning on enable; use only for a task you're actively watching (Ctrl-C interrupts). `/aY` again — or `/a` — returns to verification. `/a` and `/aY` differ only in this: `/a` asks, `/aY` doesn't (and warns). There is **no agent mode without safety** unless you deliberately type `/aY`.
 
-### File & Batch
+### Input & Files
+- `/multi` (`/m`): Compose a **multiline message** in your `$EDITOR`; on save it's sent like any message (goes through `/web`, `/lang` and agent mode). Great for long or formatted prompts without buffer hacks.
 - `/file` (`/f`) `<file> [msg]`: Send an entire file with an optional instruction.
 - `/batch` (`/s`) `[range] <file>`: Automated line-by-line batch processing.
 - `/ocr <file|folder|glob>`: OCR a single image/PDF, every image/PDF in a folder, or a glob (e.g. `/ocr ~/Downloads/scans/` or `/ocr ~/Downloads/*.png`), then analyze the combined text.
@@ -449,7 +450,8 @@ Each instance keeps its own active session, buffer, `/back` pointer and command 
 - `/lang [code]`: List or set the LLM response language (auto, en, es, de, …).
 - `/voice [name]`: List or set the macOS TTS voice.
 - `/speed [0.25-3.0]`: Adjust talk speed (multiplier format).
-- `/colors [f/b]`: Set colors for speech highlighting (e.g., white/green).
+- `/colors [f/b]`: Set colors for speech highlighting / TTS (e.g., white/green).
+- `/color [user|ai] <name>`: Set the **chat text color** for your input vs the AI reply, so a long transcript is easy to scan. Names: default, black, red, green, yellow, blue, magenta, cyan, white, gray. Defaults: you=cyan, AI=terminal default. Persist per-machine via `CHATI_USER_COLOR` / `CHATI_AI_COLOR` in `.env`.
 - `/settings`: Show current chat settings.
 
 ---

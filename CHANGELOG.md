@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.9.0] - 2026-07-29
+
+### Fixed
+- `ailocal start`/`restart` no longer **hangs when run non-interactively**
+  (piped or backgrounded). The Ollama and OpenWebUI launches didn't redirect
+  stdin, so `</dev/null` is now added to both (matching SearXNG) — an open
+  input fd kept the caller's pipe from seeing EOF. Same fix applied to the
+  `ollama serve` launches in `chati` and `setup.sh`. (#1)
+
+### Added
+- **`/multi` (`/m`)**: compose a multiline message in `$EDITOR`; on save it's
+  sent through the normal path (web/lang/agent all apply). (#2)
+- **Chat text colors**: your input and the AI reply can each have their own
+  color so a long transcript is easy to scan. `/color [user|ai] <name>` live,
+  or `CHATI_USER_COLOR` / `CHATI_AI_COLOR` in `.env`. Defaults: you=cyan,
+  AI=terminal default. Distinct from `/colors` (TTS highlighting). (#3)
+
 ## [1.8.1] - 2026-07-28
 
 ### Changed

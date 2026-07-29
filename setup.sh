@@ -140,7 +140,7 @@ remove_all() {
     step "Removing Ollama models"
     if command -v ollama >/dev/null 2>&1; then
         if ! curl -fsS --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
-            nohup ollama serve >/dev/null 2>&1 &
+            nohup ollama serve </dev/null >/dev/null 2>&1 &
             for _ in {1..10}; do
                 curl -fsS --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1 && break
                 sleep 1
@@ -266,7 +266,7 @@ else
     # flash attention + q8 KV cache. GPU/MLX acceleration is automatic.
     export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
     export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
-    nohup ollama serve >"$HOME/logs/ollama.log" 2>&1 &
+    nohup ollama serve </dev/null >"$HOME/logs/ollama.log" 2>&1 &
     for _ in {1..15}; do ollama_up && break; sleep 1; done
     ollama_up && ok "Ollama is ready" || die "Ollama didn't come up. Check ~/logs/ollama.log"
 fi
