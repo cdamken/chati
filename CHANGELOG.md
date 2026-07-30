@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.11.1] - 2026-07-30
+
+### Fixed
+- **SearXNG installer never prompts on the venv again (#5, hardening).** The
+  1.10 fix reused an existing `~/searxng/.venv` only when it had a working
+  interpreter; a half-created or broken venv still fell through to a bare
+  `uv venv`, which prompts *"A virtual environment already exists … replace it?
+  [y/N]"* and aborts an unattended re-run when answered "no". Now a broken venv
+  is recreated **non-interactively** with `uv venv --clear` (safe — a venv holds
+  no config; `settings.yml` is preserved and deps are reinstalled anyway), so
+  the installer can never hang or fail on that prompt.
+
 ## [1.11.0] - 2026-07-30
 
 ### Added

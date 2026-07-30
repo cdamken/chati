@@ -42,6 +42,15 @@ fi
 # the user declines to replace it). Deps below are (re)installed either way.
 if [[ -x "$SEARXNG_VENV/bin/python" ]]; then
     echo "🐍 Reusing existing venv at $SEARXNG_VENV"
+elif [[ -e "$SEARXNG_VENV" ]]; then
+    # The path exists but has no usable interpreter (a half-created or broken
+    # venv). Recreate it NON-INTERACTIVELY: `--clear` replaces it WITHOUT the
+    # "A virtual environment already exists … replace it? [y/N]" prompt, which
+    # otherwise aborts an unattended re-run when answered "no" (#5). Safe —
+    # a venv holds no config (settings.yml lives elsewhere and is preserved),
+    # and the deps are reinstalled right below regardless.
+    echo "🐍 Existing venv is incomplete — recreating (Python 3.12)..."
+    uv venv --clear --python 3.12 "$SEARXNG_VENV" || exit 1
 else
     echo "🐍 Creating venv (Python 3.12)..."
     uv venv --python 3.12 "$SEARXNG_VENV" || exit 1
