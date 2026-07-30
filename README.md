@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.10.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.11.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -65,7 +65,7 @@ This project provides a robust terminal-based chat experience with session manag
 
 The chat stack is **pure bash** — the only runtime dependencies are `jq`, `curl`, and `lynx` (plus macOS built-ins like `say`). There is no Python in the chat path.
 
-- **`chati`**: The main interactive CLI loop (v1.6.2).
+- **`chati`**: The main interactive CLI loop (version via `chati --version`).
 - **`ai_local/ailocal`**: Unified local AI service manager — start/stop Ollama and OpenWebUI, upgrade both, and manage OpenWebUI backups.
 - **`ola_chat/`**: Backend logic for Ollama integration (all bash).
   - `ola`: Streaming chat backend — builds the payload and parses the token stream with inline `jq`.

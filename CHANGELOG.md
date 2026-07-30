@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.11.0] - 2026-07-30
+
+### Added
+- **Prettier answers: inline TeX is rendered as Unicode as it streams (#8).**
+  Models often emit LaTeX-style math — `$\rightarrow$`, `\alpha`, `x^{2}`,
+  `\leq`, `\sum` — which reads as noise in a terminal. chati now rewrites the
+  common commands to their glyphs on the fly (`→`, `α`, `x²`, `≤`, `∑`), plus
+  Greek letters, arrows, set/logic operators, and digit super/subscripts. It's
+  deliberately conservative: fenced ` ``` ` code blocks and inline `` `code` ``
+  spans pass through untouched, and `$…$` is unwrapped **only** when it really
+  contains a command (so `$5`, `$PATH`, `$(cmd)` and `snake_case` are safe).
+  Turn it off with `CHATI_PRETTY=0`. (Emoji already work — that's the model.)
+
 ## [1.10.0] - 2026-07-30
 
 ### Fixed

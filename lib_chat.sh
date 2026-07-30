@@ -170,6 +170,100 @@ current_session_prompt_file() {
     fi
 }
 
+# --- OUTPUT PRETTIFIER (LaTeX-ish math → Unicode) ---
+# Models often emit inline TeX ("$\rightarrow$", "\alpha", "x^{2}") which reads
+# as noise in a terminal (#8). prettify_stream is a line-buffered filter that
+# rewrites the common commands to their Unicode glyphs as the answer streams.
+# It is deliberately conservative: fenced ``` code blocks and inline `code`
+# spans pass through untouched, and "$…$" is only unwrapped when it actually
+# contains a backslash command (so "$5" / "$PATH" are safe). Disable with
+# CHATI_PRETTY=0. Line-buffered (not word-buffered) so code-fence state is
+# tracked cleanly; output still appears line-by-line as the model streams.
+IFS= read -r -d '' CHATI_PRETTY_PROG <<'PRETTY_PROG'
+use strict; use warnings;
+binmode(STDIN,  ":encoding(UTF-8)");
+binmode(STDOUT, ":encoding(UTF-8)");
+$| = 1;
+my %M = (
+  'rightarrow'=>"\x{2192}", 'to'=>"\x{2192}", 'longrightarrow'=>"\x{27F6}",
+  'leftarrow'=>"\x{2190}", 'gets'=>"\x{2190}", 'longleftarrow'=>"\x{27F5}",
+  'leftrightarrow'=>"\x{2194}", 'mapsto'=>"\x{21A6}",
+  'Rightarrow'=>"\x{21D2}", 'implies'=>"\x{21D2}", 'Leftarrow'=>"\x{21D0}",
+  'Leftrightarrow'=>"\x{21D4}", 'iff'=>"\x{21D4}",
+  'uparrow'=>"\x{2191}", 'downarrow'=>"\x{2193}",
+  'times'=>"\x{00D7}", 'div'=>"\x{00F7}", 'cdot'=>"\x{00B7}", 'ast'=>"\x{2217}",
+  'pm'=>"\x{00B1}", 'mp'=>"\x{2213}", 'leq'=>"\x{2264}", 'le'=>"\x{2264}",
+  'geq'=>"\x{2265}", 'ge'=>"\x{2265}", 'neq'=>"\x{2260}", 'ne'=>"\x{2260}",
+  'approx'=>"\x{2248}", 'equiv'=>"\x{2261}", 'sim'=>"\x{223C}", 'cong'=>"\x{2245}",
+  'propto'=>"\x{221D}", 'infty'=>"\x{221E}", 'nabla'=>"\x{2207}", 'partial'=>"\x{2202}",
+  'sum'=>"\x{2211}", 'prod'=>"\x{220F}", 'int'=>"\x{222B}", 'sqrt'=>"\x{221A}",
+  'forall'=>"\x{2200}", 'exists'=>"\x{2203}", 'in'=>"\x{2208}", 'notin'=>"\x{2209}",
+  'subset'=>"\x{2282}", 'supset'=>"\x{2283}", 'subseteq'=>"\x{2286}", 'supseteq'=>"\x{2287}",
+  'cup'=>"\x{222A}", 'cap'=>"\x{2229}", 'emptyset'=>"\x{2205}", 'varnothing'=>"\x{2205}",
+  'angle'=>"\x{2220}", 'land'=>"\x{2227}", 'lor'=>"\x{2228}", 'lnot'=>"\x{00AC}", 'neg'=>"\x{00AC}",
+  'ldots'=>"\x{2026}", 'dots'=>"\x{2026}", 'cdots'=>"\x{22EF}", 'deg'=>"\x{00B0}",
+  'prime'=>"\x{2032}", 'star'=>"\x{2605}", 'bullet'=>"\x{2022}", 'circ'=>"\x{2218}",
+  'oplus'=>"\x{2295}", 'otimes'=>"\x{2297}", 'perp'=>"\x{22A5}", 'parallel'=>"\x{2225}",
+  'alpha'=>"\x{03B1}",'beta'=>"\x{03B2}",'gamma'=>"\x{03B3}",'delta'=>"\x{03B4}",
+  'epsilon'=>"\x{03B5}",'varepsilon'=>"\x{03B5}",'zeta'=>"\x{03B6}",'eta'=>"\x{03B7}",
+  'theta'=>"\x{03B8}",'vartheta'=>"\x{03B8}",'iota'=>"\x{03B9}",'kappa'=>"\x{03BA}",
+  'lambda'=>"\x{03BB}",'mu'=>"\x{03BC}",'nu'=>"\x{03BD}",'xi'=>"\x{03BE}",
+  'pi'=>"\x{03C0}",'rho'=>"\x{03C1}",'sigma'=>"\x{03C3}",'tau'=>"\x{03C4}",
+  'upsilon'=>"\x{03C5}",'phi'=>"\x{03C6}",'varphi'=>"\x{03C6}",'chi'=>"\x{03C7}",
+  'psi'=>"\x{03C8}",'omega'=>"\x{03C9}",
+  'Gamma'=>"\x{0393}",'Delta'=>"\x{0394}",'Theta'=>"\x{0398}",'Lambda'=>"\x{039B}",
+  'Xi'=>"\x{039E}",'Pi'=>"\x{03A0}",'Sigma'=>"\x{03A3}",'Phi'=>"\x{03A6}",
+  'Psi'=>"\x{03A8}",'Omega'=>"\x{03A9}",
+);
+my %SUP = ("0"=>"\x{2070}","1"=>"\x{00B9}","2"=>"\x{00B2}","3"=>"\x{00B3}","4"=>"\x{2074}",
+  "5"=>"\x{2075}","6"=>"\x{2076}","7"=>"\x{2077}","8"=>"\x{2078}","9"=>"\x{2079}",
+  "+"=>"\x{207A}","-"=>"\x{207B}","n"=>"\x{207F}","i"=>"\x{2071}");
+my %SUB = ("0"=>"\x{2080}","1"=>"\x{2081}","2"=>"\x{2082}","3"=>"\x{2083}","4"=>"\x{2084}",
+  "5"=>"\x{2085}","6"=>"\x{2086}","7"=>"\x{2087}","8"=>"\x{2088}","9"=>"\x{2089}",
+  "+"=>"\x{208A}","-"=>"\x{208B}");
+sub supize { my ($t)=@_; my $o=""; for my $c (split //,$t){ return undef unless exists $SUP{$c}; $o.=$SUP{$c}; } return $o; }
+sub subize { my ($t)=@_; my $o=""; for my $c (split //,$t){ return undef unless exists $SUB{$c}; $o.=$SUB{$c}; } return $o; }
+sub convert {
+  my ($s)=@_;
+  $s =~ s/\\(?:text|mathrm|mathbf|mathit|mathsf|mathcal|operatorname)\s*\{([^{}]*)\}/$1/g;
+  $s =~ s{\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}}{$1/$2}g;
+  $s =~ s/\\\[\s*(.*?)\s*\\\]/$1/gs;
+  $s =~ s/\\\(\s*(.*?)\s*\\\)/$1/gs;
+  $s =~ s/\$\$(?=[^\$]*\\)(.+?)\$\$/$1/gs;
+  $s =~ s/\$(?=[^\$]*\\)([^\$]+)\$/$1/g;
+  $s =~ s/\\([A-Za-z]+)/exists $M{$1} ? $M{$1} : "\\$1"/ge;
+  $s =~ s/\\([%\$&_#{}])/$1/g;
+  $s =~ s/\^\{([^{}]+)\}/my $r=supize($1); defined $r ? $r : "^{$1}"/ge;
+  $s =~ s/\^([0-9+\-])/my $r=supize($1); defined $r ? $r : "^$1"/ge;
+  $s =~ s/_\{([^{}]+)\}/my $r=subize($1); defined $r ? $r : "_{$1}"/ge;
+  $s =~ s/_([0-9+\-])/my $r=subize($1); defined $r ? $r : "_$1"/ge;
+  return $s;
+}
+sub process_line {
+  my ($line)=@_;
+  my @parts = split /(`[^`]*`)/, $line;
+  for my $p (@parts) { $p = convert($p) unless $p =~ /\A`.*`\z/s; }
+  return join("", @parts);
+}
+my $in_fence = 0;
+while (my $line = <STDIN>) {
+  if ($line =~ /^\s*```/) { $in_fence = !$in_fence; print $line; next; }
+  if ($in_fence) { print $line; next; }
+  print process_line($line);
+}
+PRETTY_PROG
+
+# Filter stdin→stdout, rewriting inline TeX to Unicode (see CHATI_PRETTY_PROG).
+# Falls back to a transparent `cat` when disabled or perl is unavailable, so it
+# can be dropped into any pipeline without risk of eating the stream.
+prettify_stream() {
+    if [[ "${CHATI_PRETTY:-1}" == "0" ]] || ! command -v perl >/dev/null 2>&1; then
+        cat
+        return
+    fi
+    perl -CSAD -e "$CHATI_PRETTY_PROG"
+}
+
 # Log messages with timestamps to $LOG_FILE. Stays quiet on success so it
 # can be sprinkled anywhere without polluting output.
 log_chat() {

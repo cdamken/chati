@@ -935,6 +935,52 @@ test_mola_delete_rejects_traversal() {
 }
 run_test "mola delete rejects path traversal" test_mola_delete_rejects_traversal
 
+# --- prettify_stream (LaTeX-ish math → Unicode, #8) ---
+test_prettify_commands() {
+    local r; r=$(printf '%s' 'A \rightarrow B, \alpha \leq \beta, x \times y' | prettify_stream)
+    assert_eq "$r" "A → B, α ≤ β, x × y" "commands → unicode"
+}
+run_test "prettify converts common TeX commands" test_prettify_commands
+
+test_prettify_inline_math() {
+    local r; r=$(printf '%s' 'the map $\rightarrow$ and $\pi r^2$' | prettify_stream)
+    assert_eq "$r" 'the map → and π r²' "unwrap \$…\$ with a command inside"
+}
+run_test "prettify unwraps inline math with a command" test_prettify_inline_math
+
+test_prettify_keeps_currency() {
+    # No backslash inside → NOT math. Currency / shell vars must survive.
+    local r; r=$(printf '%s' 'Costs $5 and $10, path $PATH, run $(ls)' | prettify_stream)
+    assert_eq "$r" 'Costs $5 and $10, path $PATH, run $(ls)' "currency/vars untouched"
+}
+run_test "prettify leaves currency and \$VARS alone" test_prettify_keeps_currency
+
+test_prettify_protects_code_fence() {
+    local out; out=$(printf '```\n2^32 and \\alpha\n```\nthen \\alpha\n' | prettify_stream)
+    # Inside the fence stays raw; the line after it converts.
+    assert_match "$out" '2\^32 and \\alpha' "fenced code stays raw" \
+        && assert_match "$out" 'then α' "post-fence line converts"
+}
+run_test "prettify skips fenced code blocks" test_prettify_protects_code_fence
+
+test_prettify_protects_inline_code() {
+    local r; r=$(printf '%s' 'use `\alpha` literally' | prettify_stream)
+    assert_eq "$r" 'use `\alpha` literally' "inline \`code\` stays raw"
+}
+run_test "prettify skips inline code spans" test_prettify_protects_inline_code
+
+test_prettify_disabled() {
+    local r; r=$(printf '%s' '\alpha \to \beta' | CHATI_PRETTY=0 prettify_stream)
+    assert_eq "$r" '\alpha \to \beta' "CHATI_PRETTY=0 → passthrough"
+}
+run_test "prettify honours CHATI_PRETTY=0" test_prettify_disabled
+
+test_prettify_preserves_snake_case() {
+    local r; r=$(printf '%s' 'file_name and func_call stay intact' | prettify_stream)
+    assert_eq "$r" 'file_name and func_call stay intact' "snake_case untouched"
+}
+run_test "prettify leaves snake_case identifiers alone" test_prettify_preserves_snake_case
+
 #==============================================================================
 # PHASE 3 — Integration (needs Ollama)
 #==============================================================================

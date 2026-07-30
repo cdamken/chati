@@ -149,6 +149,7 @@ if ! curl -sS --no-buffer --max-time "${OLA_CURL_TIMEOUT:-600}" \
             if [[ -z "$first_byte" ]]; then printf '\n'; else printf '%s' "$first_byte"; fi
         fi
         cat; } \
+    | prettify_stream \
     | tee "$LAST_RESPONSE_FILE"; then
     echo "" >&2
     log_chat "ola: streaming failed (model=$OLLAMA_MODEL)"
