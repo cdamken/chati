@@ -278,6 +278,9 @@ phase "PHASE 2: unit tests (sandboxed)"
 SANDBOX=$(mktemp -d "${TMPDIR:-/tmp}/chat-tests.XXXXXX")
 trap 'rm -rf "$SANDBOX" 2>/dev/null' EXIT
 export BASE_DIR="$SANDBOX"
+# Keep the checkout-independent data home inside the sandbox too (1.10+), so the
+# derived STATE_DIR / mkdir never touch the real ~/.local/share during tests.
+export CHATI_DATA_HOME="$SANDBOX"
 export OLA_DIR="$SANDBOX/ola_chat"
 export DOCR_DIR="$SANDBOX/docr"
 export HISTORY_DIR="$SANDBOX/conversation_histories"

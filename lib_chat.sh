@@ -43,18 +43,32 @@ export LOG_FILE="${LOG_FILE:-$HOME/logs/chati.log}"
 # Unset = the classic single shared instance (backward compatible). Saved
 # sessions (HISTORY_DIR) and the model choice stay SHARED across instances.
 export CHATI_INSTANCE="${CHATI_INSTANCE:-}"
+
+# --- STABLE, CHECKOUT-INDEPENDENT DATA HOME ---
+# Persistent user DATA — saved sessions, the active-session pointer, the model
+# choice, per-instance live buffers, the default system prompt — must survive a
+# re-clone or a move of the checkout. Before 1.10 it lived under $BASE_DIR
+# (inside the checkout), so cloning chati to a NEW path — e.g. re-cloning to
+# ~/chat when an older install had lived elsewhere — left every saved session
+# behind in the old directory. To the user they looked deleted (#7). It now
+# lives in a stable per-user location instead. Override with CHATI_DATA_HOME.
+# Existing in-checkout data is moved here once, on first run, by
+# migrate_legacy_state (called from the chati/ailocal entrypoints).
+export CHATI_DATA_HOME="${CHATI_DATA_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/chati}"
+mkdir -p "$CHATI_DATA_HOME" 2>/dev/null
+
 if [[ -n "$CHATI_INSTANCE" ]]; then
     _chati_inst=$(printf '%s' "$CHATI_INSTANCE" | tr -c 'A-Za-z0-9_-' '_')
-    export STATE_DIR="$OLA_DIR/instances/$_chati_inst"
+    export STATE_DIR="$CHATI_DATA_HOME/instances/$_chati_inst"
 else
-    export STATE_DIR="$OLA_DIR"
+    export STATE_DIR="$CHATI_DATA_HOME"
 fi
 mkdir -p "$STATE_DIR" 2>/dev/null
 
-export ACTIVE_MODEL_FILE="${ACTIVE_MODEL_FILE:-$BASE_DIR/.active_ollama_model.txt}"
+export ACTIVE_MODEL_FILE="${ACTIVE_MODEL_FILE:-$CHATI_DATA_HOME/.active_ollama_model.txt}"
 export MESSAGES_FILE="${MESSAGES_FILE:-$STATE_DIR/.messages.active.ola.txt}"
 export ACTIVE_FILE="${ACTIVE_FILE:-$MESSAGES_FILE}"
-export HISTORY_DIR="${HISTORY_DIR:-$BASE_DIR/conversation_histories}"
+export HISTORY_DIR="${HISTORY_DIR:-$CHATI_DATA_HOME/conversation_histories}"
 export PREVIOUS_FILE="${PREVIOUS_FILE:-$STATE_DIR/.ola_previous.txt}"
 # Name of the session that was active before the current one. Used by /back.
 export BACK_FILE="${BACK_FILE:-$STATE_DIR/.ola_back.txt}"
@@ -64,7 +78,7 @@ export BACK_FILE="${BACK_FILE:-$STATE_DIR/.ola_back.txt}"
 # These exports capture the *initial* session at sourcing time; consumers
 # that need the live session (e.g. chati after /switch) should call
 # current_session_prompt_file instead.
-export DEFAULT_SYSTEM_PROMPT="${DEFAULT_SYSTEM_PROMPT:-$OLA_DIR/.system_prompt.txt}"
+export DEFAULT_SYSTEM_PROMPT="${DEFAULT_SYSTEM_PROMPT:-$CHATI_DATA_HOME/.system_prompt.txt}"
 CURRENT_SESS_NAME=$(cat "$PREVIOUS_FILE" 2>/dev/null)
 if [[ -n "$CURRENT_SESS_NAME" ]]; then
     export SESSION_PROMPT="$HISTORY_DIR/${CURRENT_SESS_NAME}_prompt"
@@ -161,6 +175,63 @@ current_session_prompt_file() {
 log_chat() {
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG_FILE"
+}
+
+# One-time migration (chati ≤1.9.x → 1.10+). Move persistent DATA that used to
+# live INSIDE the checkout ($BASE_DIR) into the stable $CHATI_DATA_HOME, so a
+# future upgrade or re-clone never orphans saved sessions again (#7). It is
+# non-destructive (each item moves only when its destination doesn't already
+# exist, so it can't clobber newer data) and idempotent (a sentinel stops it
+# re-scanning). Call it ONCE from an entrypoint (chati / ailocal) — never at
+# source time: that would disturb the test sandbox and race the ola/mola
+# subprocesses that re-source this lib on every turn.
+migrate_legacy_state() {
+    local sentinel="$CHATI_DATA_HOME/.migrated"
+    [[ -f "$sentinel" ]] && return 0
+
+    local legacy_state="$BASE_DIR/ola_chat"   # pre-1.10 default STATE_DIR
+    local moved=0 f base
+
+    # Saved sessions and their per-session prompt/summary companion files.
+    if [[ -d "$BASE_DIR/conversation_histories" ]]; then
+        mkdir -p "$HISTORY_DIR" 2>/dev/null
+        for f in "$BASE_DIR/conversation_histories"/*; do
+            [[ -e "$f" ]] || continue
+            base=$(basename "$f")
+            [[ -e "$HISTORY_DIR/$base" ]] && continue
+            mv "$f" "$HISTORY_DIR/" 2>/dev/null && moved=1
+        done
+    fi
+
+    # Shared-instance active state, the model pointer and the default prompt.
+    local pair src dst
+    for pair in \
+        "$legacy_state/.ola_previous.txt=>$CHATI_DATA_HOME/.ola_previous.txt" \
+        "$legacy_state/.ola_back.txt=>$CHATI_DATA_HOME/.ola_back.txt" \
+        "$legacy_state/.messages.active.ola.txt=>$CHATI_DATA_HOME/.messages.active.ola.txt" \
+        "$legacy_state/.last_response.txt=>$CHATI_DATA_HOME/.last_response.txt" \
+        "$legacy_state/.system_prompt.txt=>$CHATI_DATA_HOME/.system_prompt.txt" \
+        "$BASE_DIR/.active_ollama_model.txt=>$CHATI_DATA_HOME/.active_ollama_model.txt"
+    do
+        src="${pair%%=>*}"; dst="${pair##*=>}"
+        [[ -f "$src" && ! -e "$dst" ]] && mv "$src" "$dst" 2>/dev/null && moved=1
+    done
+
+    # Per-instance (CHATI_INSTANCE=…) active-state directories.
+    if [[ -d "$legacy_state/instances" ]]; then
+        mkdir -p "$CHATI_DATA_HOME/instances" 2>/dev/null
+        for f in "$legacy_state/instances"/*; do
+            [[ -e "$f" ]] || continue
+            base=$(basename "$f")
+            [[ -e "$CHATI_DATA_HOME/instances/$base" ]] && continue
+            mv "$f" "$CHATI_DATA_HOME/instances/" 2>/dev/null && moved=1
+        done
+    fi
+
+    : > "$sentinel" 2>/dev/null
+    [[ "$moved" -eq 1 ]] && \
+        echo "✅ chati: moved your saved sessions & settings to $CHATI_DATA_HOME (they now survive upgrades)." >&2
+    return 0
 }
 
 # True if there's a process listening on the Ollama port. Intentionally

@@ -177,7 +177,19 @@ startwebui() {
     # opens straight to chat. Override with WEBUI_AUTH=True if you expose the
     # port. (OpenWebUI blocks turning auth back ON once a DB exists, so decide
     # this before first boot.)
-    export WEBUI_AUTH="${WEBUI_AUTH:-False}"
+    #
+    # BUT only default it on a FRESH DB. If a DB already exists it may have been
+    # created WITH auth and real user accounts; forcing WEBUI_AUTH=False onto
+    # such a DB wedges the UI — it loads but there is no way to sign in or get
+    # to chat (#6). On a pre-existing DB we therefore leave WEBUI_AUTH unset so
+    # OpenWebUI honours whatever the DB was set up with; an explicit
+    # WEBUI_AUTH=… in the environment still wins in either case.
+    if [[ -n "$(find_webui_db)" && -z "${WEBUI_AUTH:-}" ]]; then
+        echo "ℹ️  Existing OpenWebUI database detected — keeping its own auth setting."
+        echo "    (Force login-less with WEBUI_AUTH=False, or wipe it: ./setup.sh --remove-webui)"
+    else
+        export WEBUI_AUTH="${WEBUI_AUTH:-False}"
+    fi
 
     # Wire OpenWebUI's built-in web search to the local SearXNG when it's
     # installed, so the browser UI's search works out of the box. Both the

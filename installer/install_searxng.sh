@@ -37,8 +37,15 @@ else
 fi
 
 # 2. venv on Python 3.12 (3.14 breaks SearXNG's deps).
-echo "🐍 Creating venv (Python 3.12)..."
-uv venv --python 3.12 "$SEARXNG_VENV" || exit 1
+# Reuse an existing venv instead of failing: a re-run/upgrade shouldn't blow
+# away a working environment (and `uv venv` errors when it already exists and
+# the user declines to replace it). Deps below are (re)installed either way.
+if [[ -x "$SEARXNG_VENV/bin/python" ]]; then
+    echo "🐍 Reusing existing venv at $SEARXNG_VENV"
+else
+    echo "🐍 Creating venv (Python 3.12)..."
+    uv venv --python 3.12 "$SEARXNG_VENV" || exit 1
+fi
 
 # 3. Runtime + server (granian) deps. NOT `pip install .` — SearXNG's
 #    setup.py imports the package (needs msgspec) at build time, so it's

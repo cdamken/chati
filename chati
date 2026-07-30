@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.6.2 - Ollama-Centric Chat Interface
+# Chati v1.10.0 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.6.2"
+CHATI_VERSION="1.10.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -856,6 +856,11 @@ ensure_valid_model() {
     echo "    Change it anytime with /model, or install the original:"
     echo "      ollama pull $want"
 }
+
+# Move any pre-1.10 in-checkout sessions/settings into the stable data home
+# (once) so upgrades and re-clones never orphan them again (#7). No-op after
+# the first run.
+migrate_legacy_state
 
 ensure_valid_model
 

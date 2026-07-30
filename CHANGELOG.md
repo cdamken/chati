@@ -7,6 +7,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.10.0] - 2026-07-30
+
+### Fixed
+- **Saved sessions no longer disappear after an upgrade or re-clone (#7).**
+  All persistent user data — saved sessions, the active-session pointer, the
+  model choice, per-instance buffers, the default prompt — used to live *inside*
+  the checkout (`$BASE_DIR`). Cloning chati to a new path (e.g. re-cloning to
+  `~/chat` when an older install had lived elsewhere) started from an empty
+  state, so every session looked deleted — while the originals sat untouched in
+  the old directory. Data now lives in a stable, checkout-independent location
+  (`$CHATI_DATA_HOME`, default `~/.local/share/chati`, override with the env
+  var). On first run of 1.10, any in-checkout sessions/settings are **moved**
+  there once (non-destructive, idempotent) so they survive all future upgrades.
+- **OpenWebUI no longer wedges on a pre-existing database (#6).** `ailocal`
+  forced `WEBUI_AUTH=False` on every start; on a DB that had been created *with*
+  auth and real accounts, that left the UI loaded but with no way to sign in or
+  reach chat. It now forces login-less mode only on a **fresh** DB; on an
+  existing one it honours whatever the DB was set up with (an explicit
+  `WEBUI_AUTH=…` still wins).
+- **SearXNG re-install/upgrade no longer fails on an existing venv (#5).**
+  `install_searxng.sh` reuses `~/searxng/.venv` when present instead of calling
+  `uv venv` (which errors when the venv exists and you decline to replace it);
+  dependencies are still (re)installed and `settings.yml` is preserved.
+
+### Added
+- **`setup.sh --remove-webui`** — uninstall *only* OpenWebUI (wipes `~/openwebui`,
+  app + data/DB), the clean-slate fix for a wedged UI. Ollama, pulled models,
+  chati and SearXNG are left untouched. Symmetric **`--remove-searxng`** removes
+  just the local SearXNG. (#6)
+- `chati --version` now tracks the project version (was pinned at 1.6.2, which
+  made upgrades look like no-ops). (#7)
+
 ## [1.9.2] - 2026-07-30
 
 ### Fixed

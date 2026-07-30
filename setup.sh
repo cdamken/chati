@@ -34,6 +34,8 @@ WANT_WEBUI=1
 WANT_SEARXNG=1
 WANT_PULL=1
 REMOVE_ALL=0
+REMOVE_WEBUI=0
+REMOVE_SEARXNG=0
 ASSUME_YES=0
 MODEL_EXPLICIT=0                 # set to 1 when the user forces --model
 CHAT_MODEL="$DEFAULT_CHAT_MODEL"
@@ -71,6 +73,9 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
   ./setup.sh --model NAME    force a chat model, skipping the memory-based pick
   ./setup.sh --no-pull       do not pull a model (assume one already exists)
   ./setup.sh --remove-all    UNINSTALL everything this script set up (asks first)
+  ./setup.sh --remove-webui   uninstall ONLY OpenWebUI (wipes its data/DB; fixes a
+                             wedged UI). Ollama, models, chati, SearXNG untouched.
+  ./setup.sh --remove-searxng uninstall ONLY the local SearXNG. Everything else kept.
 
 The chat model is chosen from unified memory: >=32 GB -> gemma4:26b (~17 GB),
 16-31 -> llama3.1:8b-instruct-q8_0 (~8.5 GB), <16 -> gemma3:4b (~3.3 GB).
@@ -95,6 +100,8 @@ while [[ $# -gt 0 ]]; do
         --no-pull)   WANT_PULL=0 ;;
         --model)     CHAT_MODEL="${2:?--model needs a model name}"; MODEL_EXPLICIT=1; shift ;;
         --remove-all) REMOVE_ALL=1 ;;
+        --remove-webui)   REMOVE_WEBUI=1 ;;
+        --remove-searxng) REMOVE_SEARXNG=1 ;;
         --yes|-y)    ASSUME_YES=1 ;;
         -v|--version) echo "chati $(cat "$REPO_ROOT/VERSION" 2>/dev/null || echo unknown)"; exit 0 ;;
         -h|--help)   usage ;;
@@ -125,6 +132,8 @@ remove_all() {
     echo "     • Autostart agent:  ~/Library/LaunchAgents/com.chati.ailocal.plist"
     echo "     • Repo state:       .env, .active_ollama_model.txt, .web_cache,"
     echo "                         conversation_histories/, ola_chat/instances/"
+    echo "     • User data home:   ${CHATI_DATA_HOME:-$HOME/.local/share/chati}"
+    echo "                         (saved sessions, active-session pointer, settings)"
     echo "     • Ollama models:    all pulled models${models:+ ($(printf '%s' "$models" | paste -sd, -))}"
     echo "   (The repo code and Homebrew packages are NOT removed.)"
 
@@ -186,6 +195,8 @@ remove_all() {
     rm -rf "$REPO_ROOT/.env" "$REPO_ROOT/.active_ollama_model.txt" \
            "$REPO_ROOT/.web_cache" "$REPO_ROOT/ola_chat/instances"
     rm -rf "$REPO_ROOT/conversation_histories"/* 2>/dev/null || true
+    # Stable data home (1.10+): saved sessions, active-session pointer, settings.
+    rm -rf "${CHATI_DATA_HOME:-$HOME/.local/share/chati}"
     ok "Apps and local state removed"
 
     printf '\n\033[1;32m✅ Removed. Homebrew and its packages were left intact.\033[0m\n'
@@ -193,7 +204,54 @@ remove_all() {
     exit 0
 }
 
-if [[ "$REMOVE_ALL" -eq 1 ]]; then remove_all; fi
+# ---- Partial uninstall: OpenWebUI only (--remove-webui) ---------------------
+# For when a pre-existing OpenWebUI DB (e.g. one created with auth/users) has
+# the UI wedged and you just want a clean slate for the browser app without
+# touching Ollama, your pulled models, chati or SearXNG (#6). Wipes ~/openwebui
+# entirely — app venv AND its data/DB — so the next start comes up fresh and
+# login-less.
+remove_webui() {
+    echo "🧹 --remove-webui will DELETE OpenWebUI only:"
+    echo "     • App + venv + data/DB: ~/openwebui  (users & settings included)"
+    echo "   Ollama, your pulled models, chati and SearXNG are NOT touched."
+    if [[ "$ASSUME_YES" -ne 1 ]]; then
+        printf '\nProceed? [y/N] '
+        local reply; read -r reply
+        [[ "$reply" == [yY] || "$reply" == [yY][eE][sS] ]] || die "Aborted — nothing removed."
+    fi
+    step "Stopping OpenWebUI"
+    [[ -x "$REPO_ROOT/ai_local/ailocal" ]] && "$REPO_ROOT/ai_local/ailocal" stop webui >/dev/null 2>&1 || true
+    pkill -f 'open-webui serve' >/dev/null 2>&1 || true
+    step "Removing OpenWebUI app + data"
+    rm -rf "$HOME/openwebui"
+    ok "OpenWebUI removed (Ollama, models, chati and SearXNG left intact)"
+    echo "Re-install just OpenWebUI with: ./setup.sh --no-searxng --no-pull"
+    exit 0
+}
+
+# ---- Partial uninstall: SearXNG only (--remove-searxng) ---------------------
+remove_searxng() {
+    echo "🧹 --remove-searxng will DELETE the local SearXNG only:"
+    echo "     • Source + venv + settings: ~/searxng"
+    echo "   Ollama, your pulled models, chati and OpenWebUI are NOT touched."
+    if [[ "$ASSUME_YES" -ne 1 ]]; then
+        printf '\nProceed? [y/N] '
+        local reply; read -r reply
+        [[ "$reply" == [yY] || "$reply" == [yY][eE][sS] ]] || die "Aborted — nothing removed."
+    fi
+    step "Stopping SearXNG"
+    [[ -x "$REPO_ROOT/ai_local/ailocal" ]] && "$REPO_ROOT/ai_local/ailocal" stop searxng >/dev/null 2>&1 || true
+    pkill -f 'granian.*searx\.webapp' >/dev/null 2>&1 || true
+    step "Removing SearXNG"
+    rm -rf "$HOME/searxng"
+    ok "SearXNG removed (Ollama, models, chati and OpenWebUI left intact)"
+    echo "Re-install just SearXNG with: ./setup.sh --no-webui --no-pull"
+    exit 0
+}
+
+if [[ "$REMOVE_ALL"     -eq 1 ]]; then remove_all;     fi
+if [[ "$REMOVE_WEBUI"   -eq 1 ]]; then remove_webui;   fi
+if [[ "$REMOVE_SEARXNG" -eq 1 ]]; then remove_searxng; fi
 
 echo "🚀 chati setup — repo at: $REPO_ROOT"
 
