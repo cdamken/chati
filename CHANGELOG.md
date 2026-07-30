@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.9.1] - 2026-07-30
+
+### Fixed
+- Docs: the clone step failed with *"destination path already exists"* when
+  `~/chat` was already cloned. The Quick Start / Fresh Mac Setup now use a
+  clone-or-update one-liner:
+  `git clone … ~/chat 2>/dev/null || git -C ~/chat pull`. (#4)
+
 ## [1.9.0] - 2026-07-29
 
 ### Fixed

@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.9.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.9.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -16,10 +16,10 @@ An Ollama-centric, high-performance chat interface for the command line, with lo
 > eval "$(/opt/homebrew/bin/brew shellenv)"
 > ```
 
-**1. Clone the repo:**
+**1. Get the code** (clones it, or updates it if `~/chat` already exists):
 
 ```bash
-git clone https://github.com/cdamken/chati ~/chat
+git clone https://github.com/cdamken/chati ~/chat 2>/dev/null || git -C ~/chat pull
 cd ~/chat
 ```
 
@@ -98,14 +98,16 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 
 > **Copy-paste tip (important on macOS):** paste only the command itself, not the surrounding text. macOS's zsh does **not** treat `#` as a comment when typed interactively, so pasting a line that includes a trailing `# …` note — or any stray quote — can leave the shell stuck at a `quote>` / `dquote>` prompt waiting for a closing quote. The **setup commands in this section are comment-free** so they paste cleanly. In the reference sections further down, paste the command up to the `#` only. If you ever land on `quote>`, press **Ctrl-C** and try again with just the command.
 
-### 2. Clone the code
+### 2. Get the code
+
+Clone it — or, **if `~/chat` already exists** (you cloned before), this updates it instead of failing with *"destination path already exists"*:
 
 ```bash
-git clone https://github.com/cdamken/chati ~/chat
+git clone https://github.com/cdamken/chati ~/chat 2>/dev/null || git -C ~/chat pull
 cd ~/chat
 ```
 
-> The folder does **not** have to be `~/chat` — every script resolves paths relative to its own location, so any name/location works (`~/chat` is just the convention). If it already exists as an older copy, see [Updating to the latest version](#updating-to-the-latest-version) below instead of re-cloning.
+> The folder does **not** have to be `~/chat` — every script resolves paths relative to its own location, so any name/location works (`~/chat` is just the convention). Your config and chats are safe on update: `.env` and `conversation_histories/` are gitignored, so `git pull` never touches them. See also [Updating to the latest version](#updating-to-the-latest-version).
 
 ### 3. Run the installer
 
