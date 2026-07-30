@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.9.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.9.2-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -16,10 +16,10 @@ An Ollama-centric, high-performance chat interface for the command line, with lo
 > eval "$(/opt/homebrew/bin/brew shellenv)"
 > ```
 
-**1. Get the code** (clones it, or updates it if `~/chat` already exists):
+**1. Get the code** (clones it, or force-updates it to latest if `~/chat` already exists):
 
 ```bash
-git clone https://github.com/cdamken/chati ~/chat 2>/dev/null || git -C ~/chat pull
+git clone https://github.com/cdamken/chati ~/chat 2>/dev/null || (cd ~/chat && git fetch origin && git reset --hard origin/main)
 cd ~/chat
 ```
 
@@ -100,14 +100,16 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 
 ### 2. Get the code
 
-Clone it — or, **if `~/chat` already exists** (you cloned before), this updates it instead of failing with *"destination path already exists"*:
+Clone it — or, **if `~/chat` already exists** (you cloned before), the second half force-updates it to the latest instead of failing with *"destination path already exists"*:
 
 ```bash
-git clone https://github.com/cdamken/chati ~/chat 2>/dev/null || git -C ~/chat pull
+git clone https://github.com/cdamken/chati ~/chat 2>/dev/null || (cd ~/chat && git fetch origin && git reset --hard origin/main)
 cd ~/chat
 ```
 
-> The folder does **not** have to be `~/chat` — every script resolves paths relative to its own location, so any name/location works (`~/chat` is just the convention). Your config and chats are safe on update: `.env` and `conversation_histories/` are gitignored, so `git pull` never touches them. See also [Updating to the latest version](#updating-to-the-latest-version).
+> `fetch` + `reset --hard origin/main` is used (rather than a plain `git pull`) because it works even when the local branch has no upstream configured — a plain `pull` fails there with *"no tracking information for the current branch."* It only discards local **code** edits: your config and chats are safe — `.env` and `conversation_histories/` are gitignored, so they're never touched.
+>
+> The folder does **not** have to be `~/chat` — every script resolves paths relative to its own location, so any name/location works. See also [Updating to the latest version](#updating-to-the-latest-version).
 
 ### 3. Run the installer
 

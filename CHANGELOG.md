@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.9.2] - 2026-07-30
+
+### Fixed
+- The clone-or-update one-liner (#4) again: the 1.9.1 version used `git pull`,
+  which fails with *"no tracking information for the current branch"* when the
+  local `main` has no upstream configured (as on a machine set up by
+  re-pointing the remote). Now uses
+  `… || (cd ~/chat && git fetch origin && git reset --hard origin/main)`,
+  which works regardless of tracking or divergence and only discards local
+  code edits (config/chats are gitignored). Reproduced and verified.
+
 ## [1.9.1] - 2026-07-30
 
 ### Fixed
