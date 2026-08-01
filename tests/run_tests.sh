@@ -805,6 +805,25 @@ test_agent_prompt_plans_multipart() {
 }
 run_test "agent_capability_prompt tells the agent to plan multi-part tasks" test_agent_prompt_plans_multipart
 
+# --- ola_stream_thinking (reasoning channel render for /think) ---
+test_ola_stream_thinking_shows_reasoning() {
+    local out
+    out=$(printf '%s\n' \
+        '{"message":{"thinking":"paso uno "}}' \
+        '{"message":{"thinking":"paso dos"}}' \
+        '{"message":{"content":"la respuesta"}}' | ola_stream_thinking)
+    assert_match "$out" "💭" "prints the thinking header" \
+        && assert_match "$out" "paso uno paso dos" "streams the thinking tokens in order" \
+        && { ! printf '%s' "$out" | grep -q "la respuesta"; }   # content stays out of this channel
+}
+run_test "ola_stream_thinking renders reasoning, excludes the answer" test_ola_stream_thinking_shows_reasoning
+
+test_ola_stream_thinking_silent_without_reasoning() {
+    local out; out=$(printf '%s\n' '{"message":{"content":"hola"}}' | ola_stream_thinking)
+    assert_eq "$out" "" "no thinking field -> no header, no output"
+}
+run_test "ola_stream_thinking is silent when there is no reasoning" test_ola_stream_thinking_silent_without_reasoning
+
 # --- extract_exec_cmd ---
 test_exec_simple() {
     local r; r=$(extract_exec_cmd "[EXEC: ls -la ~]")

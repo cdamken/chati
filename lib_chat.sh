@@ -264,6 +264,22 @@ prettify_stream() {
     perl -CSAD -e "$CHATI_PRETTY_PROG"
 }
 
+# Render the REASONING channel of an Ollama /api/chat stream. Reads the NDJSON
+# chunks on stdin and prints each chunk's .message.thinking in bright gray under
+# a 💭 header — nothing at all if the model emits no thinking. Display-only: the
+# caller sends this to the terminal (>&2), so it never mixes into the saved
+# answer or the conversation history. The color (90 = bright gray) is distinct
+# from the user (cyan) and the answer (default), so the reasoning reads as a
+# separate voice.
+ola_stream_thinking() {
+    jq -j --unbuffered 'select((.message.thinking // "") != "") | .message.thinking' \
+    | { IFS= read -r -n1 _c || exit 0        # no thinking at all -> print nothing
+        printf '\033[90m💭 '                  # header + open bright-gray
+        [[ -n "$_c" ]] && printf '%s' "$_c"   # (empty $_c means the first byte was a newline)
+        cat
+        printf '\033[0m\n'; }                 # reset color, end the block
+}
+
 # Log messages with timestamps to $LOG_FILE. Stays quiet on success so it
 # can be sprinkled anywhere without polluting output.
 log_chat() {
