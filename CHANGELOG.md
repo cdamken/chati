@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.14.0] - 2026-08-02
+
+### Added
+- **`/think` — see the model's reasoning.** Toggle it and a reasoning model's
+  thinking streams live in bright gray under a 💭 header, then the answer follows
+  in the normal color. The reasoning is display-only: it never enters the saved
+  answer or the conversation history. Sends Ollama's `"think": true` and renders
+  the separate `.message.thinking` channel (`ola_stream_thinking`). Off by
+  default, so a normal turn is byte-for-byte unchanged. `/think` gates on the
+  model's reported capability (`ollama show`) — on a plain model it says there's
+  nothing to show and points you to `/model` (e.g. `deepseek-r1:7b`). gemma4,
+  deepseek-r1, and qwen3 report the capability.
+
 ## [1.13.0] - 2026-08-02
 
 ### Added

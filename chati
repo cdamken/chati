@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.13.0"
+CHATI_VERSION="1.14.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -52,6 +52,7 @@ LAST_RESPONSE=""
 DEFAULT_VOICE="AUTO"     # Automatic voice detection
 VOICE_MODE="OFF"         # Global talk toggle
 WEB_MODE="OFF"           # Global web search toggle
+THINK_MODE="OFF"         # Show the model's reasoning (/think); reasoning models only
 AGENT_MODE="OFF"         # Global autonomous agent toggle
 AGENT_AUTOACCEPT="OFF"   # /aY: run EVERY proposed command without asking
 FORCE_LANG="auto"        # Language forcing (auto, en, es, de, etc.)
@@ -281,6 +282,11 @@ speak_if_enabled() {
 # so showing it twice would be noisy. stderr (the 🤔 thinking glyph and
 # any errors) is left alone.
 send_and_capture() {
+    # Turn on Ollama's reasoning channel for this call when /think is on; ola
+    # renders it in gray and never saves it to history. Off = normal turn.
+    local OLA_THINK=0
+    [[ "$THINK_MODE" == "ON" ]] && OLA_THINK=1
+    export OLA_THINK
     if [[ "$VOICE_MODE" == "ON" ]]; then
         "$CHAT_CMD" "$@" >/dev/null
     else
@@ -721,6 +727,7 @@ Current Chati Settings:
 🤖 Model:    $curr_model
 🌐 Lang:     $FORCE_LANG
 🔎 Web:      $WEB_MODE
+💭 Thinking: $THINK_MODE   (/think — show reasoning; reasoning models only)
 🛠️  Agent:    $agent_status
 🗣️  Talk:     $VOICE_MODE (Voice: $DEFAULT_VOICE, Speed: ${SAY_SPEED}x, Colors: $SAY_COLORS)
 🎨 Colors:   you=$USER_COLOR_NAME · ai=$AI_COLOR_NAME  (/color to change)
@@ -775,6 +782,11 @@ Mode Toggles:
                         answer. The per-turn cache lives at
                         \$WEB_CACHE_DIR/turn.* and is wiped automatically
                         once the answer lands.
+/think                  Toggle showing the model's reasoning. When on, the
+                        thinking streams in gray (💭) and the answer follows
+                        in normal color; the reasoning is never saved to
+                        history. Only reasoning models have it (deepseek-r1,
+                        gemma4, qwen3…); on a plain model /think says so.
 /agent (/a)             Toggle Agent Mode — allow the AI to propose
                         shell commands to run on your Mac. Read-only
                         commands (ls, cat, grep, find, ps…) run directly;
@@ -1100,6 +1112,24 @@ while true; do
                         echo "🚫 Web search unavailable:"
                         echo "$web_reason"
                         echo "   Staying OFF. Set SEARXNG_URLS (or run a local SearXNG); see installer/SEARXNG_SETUP.md."
+                    fi
+                fi ;;
+            /think)
+                if [[ "$THINK_MODE" == "ON" ]]; then
+                    THINK_MODE="OFF"
+                    echo "💭 Thinking: OFF"
+                else
+                    # Only reasoning models have a thinking channel; asking a
+                    # plain model to think can error and would show nothing.
+                    # Ollama reports the capability, so gate on it.
+                    think_m=$(active_model)
+                    if ollama show "$think_m" 2>/dev/null | grep -qiw 'thinking'; then
+                        THINK_MODE="ON"
+                        echo "💭 Thinking: ON — reasoning shows in gray, then the answer ($think_m)"
+                    else
+                        THINK_MODE="OFF"
+                        echo "🚫 '$think_m' has no 'thinking' capability — nothing to show."
+                        echo "   Switch to a reasoning model with /model (e.g. deepseek-r1:7b), then /think again."
                     fi
                 fi ;;
             /speed)

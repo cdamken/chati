@@ -97,11 +97,16 @@ SUMMARY_CONTENT=""
 # through to the capture when the line isn't JSON.
 PAYLOAD_FILE=$(mktemp)
 trap 'rm -f "$PAYLOAD_FILE"' EXIT
+# Show the model's reasoning when OLA_THINK=1 (chati's /think). Adds
+# "think": true so Ollama returns the .message.thinking channel; off by
+# default, so the payload is byte-for-byte unchanged for a normal turn.
+OLA_THINK_BOOL=false; [[ "${OLA_THINK:-0}" == 1 ]] && OLA_THINK_BOOL=true
 tail -n "${SLIDING_WINDOW:-20}" "$MESSAGES_FILE" 2>/dev/null | jq -R -s \
     --arg model "$OLLAMA_MODEL" \
     --arg prompt "$PROMPT_CONTENT" \
     --arg summary "$SUMMARY_CONTENT" \
-    --arg extra "${OLA_EXTRA_SYSTEM:-}" '
+    --arg extra "${OLA_EXTRA_SYSTEM:-}" \
+    --argjson think "$OLA_THINK_BOOL" '
     def parse_line:
         fromjson? // (capture("^(?<role>[A-Za-z]+): (?<content>.*)$")
                       | .content |= gsub("\\\\n"; "\n"));
@@ -116,7 +121,8 @@ tail -n "${SLIDING_WINDOW:-20}" "$MESSAGES_FILE" 2>/dev/null | jq -R -s \
          (if $extra   != "" then [{role:"system", content:$extra}] else [] end) +
          $hist),
       stream: true,
-      options: { num_predict: 4096 } }' > "$PAYLOAD_FILE"
+      options: { num_predict: 4096 } }
+    + (if $think then {think: true} else {} end)' > "$PAYLOAD_FILE"
 
 # Reset side-channel for chati to consume after the stream.
 : > "$LAST_RESPONSE_FILE"
@@ -139,6 +145,7 @@ if ! curl -sS --no-buffer --max-time "${OLA_CURL_TIMEOUT:-600}" \
         -X POST "$OLLAMA_API/api/chat" \
         -H "Content-Type: application/json" \
         --data-binary "@$PAYLOAD_FILE" \
+    | { if [[ "${OLA_THINK:-0}" == 1 ]]; then tee >(ola_stream_thinking >&2); else cat; fi; } \
     | jq -j --unbuffered \
         'if .error then ("\nOllama error: \(.error)\n" | halt_error(1))
          else (.message.content // "") end' \
