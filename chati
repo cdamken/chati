@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.11.1"
+CHATI_VERSION="1.12.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -392,13 +392,26 @@ do_web_research() {
     # stale memory — which would silently defeat /web.
     [[ ${#subs[@]} -eq 0 ]] && subs=("$m_for_decomp")
 
+    # Drop near-duplicate subqueries the decomposer may have emitted, so we
+    # don't spend a round-trip on the same search twice.
+    local -a uniq=(); local u
+    while IFS= read -r u; do [[ -n "$u" ]] && uniq+=("$u"); done \
+        < <(printf '%s\n' "${subs[@]}" | dedup_queries)
+    [[ ${#uniq[@]} -gt 0 ]] && subs=("${uniq[@]}")
+
+    # Search every subquery in PARALLEL (bounded, order-preserving) instead of
+    # one-at-a-time — the big latency win for a multi-query turn.
+    echo "   🔎 searching ${#subs[@]} queries (parallel)..." >&2
+    local -a results=(); local res
+    while IFS= read -r -d '' res; do results+=("$res"); done \
+        < <(web_search_many "${subs[@]}")
+
     local notes=""
-    local i=0 got=0 blocked=0 empty=0
+    local i got=0 blocked=0 empty=0
     local sq r
-    for sq in "${subs[@]}"; do
-        ((i++))
-        echo "   [$i/${#subs[@]}] $sq" >&2
-        r=$(web_search "$sq" 2>/dev/null)
+    for (( i = 0; i < ${#subs[@]}; i++ )); do
+        sq="${subs[$i]}"; r="${results[$i]}"
+        echo "   [$((i+1))/${#subs[@]}] $sq" >&2
         case "$r" in
             "Error: search engine is rate-limiting"*)
                 echo "       ⛔ blocked by search engine (anti-bot challenge)" >&2
@@ -415,7 +428,7 @@ do_web_research() {
             *)
                 notes+="
 
---- [$i] $sq
+--- [$((i+1))] $sq
 $r"
                 ((got++))
                 ;;

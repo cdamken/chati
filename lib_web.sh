@@ -274,6 +274,36 @@ web_search() {
     printf '%s' "$last"
 }
 
+# Run several web_search calls with BOUNDED CONCURRENCY, preserving input order.
+# Args: the queries. Output: each query's result in order, separated by a NUL
+# byte (read with `while IFS= read -r -d ''`). Searching a multi-query /web turn
+# in parallel is the big latency win — 8 serial searches at up to 30s each
+# become a few concurrent batches. Concurrency = WEB_SEARCH_CONCURRENCY
+# (default 3, deliberately modest); web_search's per-endpoint cooldown +
+# random round-robin keep the parallelism from hammering one instance. Raise it
+# only if you run several SEARXNG_URLS. Falls back to serial if mktemp fails.
+web_search_many() {
+    local conc="${WEB_SEARCH_CONCURRENCY:-3}"; (( conc < 1 )) && conc=1
+    local n=$# i=0 running=0 td q
+    (( n == 0 )) && return 0
+    if ! td=$(mktemp -d "${WEB_CACHE_DIR:-/tmp}/wsm.XXXXXX" 2>/dev/null); then
+        for q in "$@"; do web_search "$q" 2>/dev/null; printf '\0'; done
+        return 0
+    fi
+    local -a pids=()
+    for q in "$@"; do
+        web_search "$q" > "$td/$i.out" 2>/dev/null &
+        pids+=("$!"); i=$((i+1)); running=$((running+1))
+        if (( running >= conc )); then wait "${pids[@]}"; pids=(); running=0; fi
+    done
+    [[ ${#pids[@]} -gt 0 ]] && wait "${pids[@]}"
+    for (( i = 0; i < n; i++ )); do
+        cat "$td/$i.out" 2>/dev/null
+        printf '\0'
+    done
+    rm -rf "$td"
+}
+
 
 # --- Query decomposition (/w) --------------------------------------------------
 
@@ -292,6 +322,18 @@ clean_subqueries() {
         | awk -v max="$max" '
             { gsub(/^[ \t]+|[ \t]+$/, "") }
             length($0) >= 4 && $0 !~ /^#/ { print; if (++n >= max) exit }'
+}
+
+# Drop duplicate queries, case- and whitespace-insensitive, keeping first-seen
+# order. The decomposer sometimes emits near-identical lines; searching each is
+# a wasted round-trip. stdin → stdout. Original text (not the normalized key) is
+# what gets printed, so the search still uses the model's phrasing.
+dedup_queries() {
+    awk '{
+        key = tolower($0); gsub(/[[:space:]]+/, " ", key)
+        sub(/^ /, "", key); sub(/ $/, "", key)
+        if (key != "" && !(key in seen)) { seen[key] = 1; print }
+    }'
 }
 
 # Triage: does this query need a LIVE web search, or can the model answer
