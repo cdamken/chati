@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.11.2] - 2026-08-01
+
+### Fixed
+- **LAN-exposed Ollama is now reachable on *every* start, not just after a
+  manual restart.** When `ailocal lan on` is set, other machines must always be
+  able to reach Ollama (over LAN/Tailscale) — including after login autostart or
+  a reboot. Two gaps broke that: (1) `startollama` short-circuited on "already
+  running" without checking the daemon was actually reachable off-localhost, so
+  a process that came up before the LAN marker (or with a wedged/IPv6-only
+  socket) stayed invisible to other machines forever; (2) it applied the marker
+  as `${OLLAMA_HOST:-…}`, letting a stale inherited value win over the persisted
+  choice. Now the marker is **authoritative** on every start, and if LAN mode is
+  on but the daemon isn't reachable on the Mac's LAN/Tailscale address,
+  `startollama` **restarts it to apply the bind**. New helper
+  `ollama_lan_reachable` probes the real external addresses (a localhost- or
+  IPv6-only bind fails it) and no-ops when the Mac is offline.
+
 ## [1.11.1] - 2026-07-30
 
 ### Fixed
