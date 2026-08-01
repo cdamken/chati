@@ -7,6 +7,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.12.1] - 2026-08-02
+
+### Changed
+- **`/web` decompose no longer cold-loads the big answer model.** Splitting a
+  question into search queries used to run on the active (answer) model — a 30B
+  paying ~2 minutes of cold-load just to rewrite keywords was the real "/web is
+  slow" delay (the search itself is ~1s). A new `decompose_model()` picker now
+  prefers an installed mid model (`llama3.1:8b`, then `…q8_0`, `gemma4:e4b`,
+  `qwen2.5:7b`), honoring `DECOMPOSE_MODEL`, and only falls back to the active
+  model when none is installed. The **answer** still uses the active model, so
+  analysis quality is unchanged. Works with no `.env` config.
+
+### Added
+- **`setup.sh` pulls the `/web` helper models** (`llama3.2:3b` for routing,
+  `llama3.1:8b` for decompose) alongside the chat model, so web research is fast
+  out of the box after a fresh `git pull` + `./setup.sh`. Skipped under
+  `--no-pull` (then `/web` falls back to the chat model for those steps).
+
 ## [1.12.0] - 2026-08-02
 
 ### Changed

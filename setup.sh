@@ -345,6 +345,14 @@ if [[ "$MODEL_EXPLICIT" -ne 1 ]]; then
     [[ "$CHAT_MODEL" == "gemma4:26b" ]] && EXTRA_MODELS="gemma4:31b"
 fi
 
+# Small helpers for /web, pulled alongside the chat model so web research is
+# fast out of the box: llama3.2:3b decides SEARCH vs DIRECT (router), and
+# llama3.1:8b rewrites the question into search queries (decompose). Both load
+# and run far faster than a big answer model, so /web never cold-loads the big
+# model just to triage or make keywords. If absent, /web still works but falls
+# back to the chat model for those steps (slow — that is the delay to avoid).
+WEB_HELPER_MODELS="llama3.2:3b llama3.1:8b"
+
 if [[ "$WANT_PULL" -eq 0 ]]; then
     have_any_model \
         && ok "Using existing model(s): $(installed_models | paste -sd, -)" \
@@ -371,6 +379,17 @@ else
         else
             warn "Pulling extra model '$_m' (dense, max-quality — a few minutes)…"
             ollama pull "$_m" && ok "Pulled '$_m'" || warn "Could not pull '$_m' (skipped)"
+        fi
+    done
+    # Pull the /web helper models (skip any that already is the chat model).
+    for _m in $WEB_HELPER_MODELS; do
+        [[ "$_m" == "$CHAT_MODEL" ]] && { ok "Web helper '$_m' is the chat model already"; continue; }
+        if installed_models | grep -qxF "$_m"; then
+            ok "Web helper '$_m' already present"
+        else
+            warn "Pulling /web helper '$_m'…"
+            ollama pull "$_m" && ok "Pulled '$_m'" \
+                || warn "Could not pull '$_m' (skipped; /web falls back to the chat model)"
         fi
     done
 fi
@@ -450,7 +469,7 @@ if [[ "$WANT_SEARXNG" -eq 1 && "$SEARXNG_STARTED" -eq 1 ]]; then
 fi
 cat <<EOF
 Service status:          ailocal status
-Faster /web routing:     ollama pull llama3.2:3b
+/web helpers:            llama3.2:3b (route) + llama3.1:8b (queries) — auto-pulled
 Uninstall everything:    ./setup.sh --remove-all
 EOF
 echo

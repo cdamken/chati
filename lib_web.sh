@@ -385,14 +385,37 @@ User message: $query"
 # enumeration ("presidents of all 54 African countries") raise it, e.g.
 # DECOMPOSE_MAX_SUBS=60 — it will run that many searches (slower, and
 # heavier on your SearXNG), so it's opt-in rather than the default.
+
+# Preferences for the DECOMPOSE step: mid-size models that still understand a
+# domain (finance terms like "p/e", tickers, references) but load and run far
+# faster than a 30B answer model. A 3B mangles "p/e de krka" into event tickets;
+# the big answer model wastes ~2min cold-loading just to rewrite keywords into
+# a search box. Mirrors router_model(): honor DECOMPOSE_MODEL, else the first
+# installed preference, else the active model (always works, just slower).
+DECOMPOSE_PREFERENCES=("llama3.1:8b" "llama3.1:8b-instruct-q8_0" "gemma4:e4b" "qwen2.5:7b")
+decompose_model() {
+    if [[ -n "${DECOMPOSE_MODEL:-}" ]]; then printf '%s\n' "$DECOMPOSE_MODEL"; return 0; fi
+    local installed pref
+    installed=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+    if [[ -n "$installed" ]]; then
+        for pref in "${DECOMPOSE_PREFERENCES[@]}"; do
+            if printf '%s\n' "$installed" | grep -qxF "$pref"; then
+                printf '%s\n' "$pref"; return 0
+            fi
+        done
+    fi
+    active_model
+}
+
 decompose_query() {
     local query="$1" context_file="${2:-}"
     local max_subs="${DECOMPOSE_MAX_SUBS:-8}"
     # A single call, but with a big model it can take 30-120s — use the
     # long streaming timeout, not the meta one.
     local timeout="${DECOMPOSE_TIMEOUT:-${OLA_CURL_TIMEOUT:-600}}"
-    local model="${DECOMPOSE_MODEL:-}"
-    [[ -z "$model" ]] && model=$(active_model)
+    # Prefer an installed mid-size model over the big answer model (see
+    # decompose_model); DECOMPOSE_MODEL still overrides.
+    local model; model=$(decompose_model)
 
     local context=""
     [[ -n "$context_file" && -s "$context_file" ]] && context=$(cat "$context_file")
