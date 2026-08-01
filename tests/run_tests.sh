@@ -638,6 +638,31 @@ test_web_unavailable_when_url_empty() {
 }
 run_test "web_search_available is false without a URL" test_web_unavailable_when_url_empty
 
+# --- dedup_queries + web_search_many (parallel research helpers) ---
+test_dedup_queries() {
+    # Case- and whitespace-insensitive; keeps first-seen order and original text.
+    local out
+    out=$(printf 'Apple ROIC\napple   roic\nApple PE\nApple ROIC\n' | dedup_queries)
+    assert_eq "$out" "$(printf 'Apple ROIC\nApple PE')" "dedup keeps first-seen, ignores case/space"
+}
+run_test "dedup_queries removes case/space duplicates, keeps order" test_dedup_queries
+
+test_web_search_many_order_and_records() {
+    # Stub web_search deterministically; verify order preserved and exactly one
+    # NUL-delimited record per query (parallelism must not scramble either).
+    local orig; orig=$(declare -f web_search)
+    web_search() { printf 'RES(%s)' "$1"; }
+    local -a got=(); local res
+    while IFS= read -r -d '' res; do got+=("$res"); done \
+        < <(WEB_SEARCH_CONCURRENCY=2 web_search_many "q one" "q two" "q three")
+    eval "$orig"
+    assert_eq "${#got[@]}" "3" "one record per query" || return 1
+    assert_eq "${got[0]}" "RES(q one)" "record 0 in order" || return 1
+    assert_eq "${got[1]}" "RES(q two)" "record 1 in order" || return 1
+    assert_eq "${got[2]}" "RES(q three)" "record 2 in order"
+}
+run_test "web_search_many preserves order, one record per query" test_web_search_many_order_and_records
+
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
     # The critical safety property: on ANY failure (here, a model that

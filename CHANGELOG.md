@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.12.0] - 2026-08-02
+
+### Changed
+- **`/web` searches its subqueries in parallel.** `do_web_research` ran each
+  decomposed subquery one after another (up to 30s each); it now searches them
+  concurrently with a bounded pool (`WEB_SEARCH_CONCURRENCY`, default 3),
+  preserving order — a multi-query turn drops from the sum of the searches to a
+  few batches. The per-endpoint cooldown and random round-robin keep the
+  parallelism from hammering a single SearXNG instance.
+
+### Added
+- **`web_search_many` (lib_web.sh):** run several `web_search` calls with bounded
+  concurrency; results come back in input order, NUL-delimited.
+- **`dedup_queries` (lib_web.sh):** drop case/whitespace-duplicate subqueries
+  before searching, so a decomposer that repeats itself no longer costs extra
+  round-trips.
+
 ## [1.11.1] - 2026-07-30
 
 ### Fixed
