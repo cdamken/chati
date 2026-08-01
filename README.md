@@ -360,6 +360,14 @@ cp .env.example .env        # then edit .env
 
 **Round-robin across several instances.** SearXNG queries upstream engines (Google/Bing/DDG…) that rate-limit **by IP**. Point `SEARXNG_URLS` at more than one instance — each on a different IP — and `/web` spreads calls **randomly** across them, so N instances ≈ **N× the query budget** before you hit limits (a real win for batch jobs making hundreds of calls). On a `429`/`503` an endpoint is **parked for a cooldown** so traffic flows to the healthy ones instead of bouncing off the throttled one; a dead endpoint fails over instantly. Add a server later = one more URL in `SEARXNG_URLS`, no code change.
 
+**Headless: `chati search <query>`.** The same pipeline is available non-interactively — it prints the SearXNG results and exits, no REPL and no LLM call:
+
+```bash
+chati search "Kimberly-Clark forward P/E ROIC dividend 2026"
+```
+
+This is the programmatic entry point for scripts, pipelines and other machines/agents that need **fresh web facts** without driving the chat UI — e.g. feeding today's numbers into a local model on another host, or a batch screen that pulls current data per item. It reuses `lib_web.sh`'s `web_search`, so it honours the exact same `SEARXNG_URLS`, round-robin and cooldown behaviour. Exit codes: `2` on a missing query, `1` if no backend is configured.
+
 ```bash
 SEARXNG_URLS="http://localhost:8890, https://cloud.example.com/searx"
 ```

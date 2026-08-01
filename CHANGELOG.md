@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.12.0] - 2026-08-02
+
+### Added
+- **`chati search <query>` — headless web search.** Runs the same SearXNG
+  pipeline as the interactive `/web` toggle, prints the results and exits (no
+  REPL, no LLM call). Reuses `lib_web.sh`'s `web_search`, so it hits the exact
+  same endpoints and formatting configured in `.env` (`SEARXNG_URLS`). Meant for
+  scripts, pipelines and other machines/agents that need fresh web data without
+  driving the interactive UI — e.g. feeding current facts into a local model on
+  another host. Parsed up-front alongside `--help`/`--version`; exits `2` on a
+  missing query, `1` if the web backend isn't available.
+
 ## [1.11.1] - 2026-07-30
 
 ### Fixed
