@@ -663,6 +663,27 @@ test_web_search_many_order_and_records() {
 }
 run_test "web_search_many preserves order, one record per query" test_web_search_many_order_and_records
 
+# --- decompose_model picker (fast /web decompose by default, no .env needed) ---
+test_decompose_model_picks_mid_model() {
+    # 1. explicit DECOMPOSE_MODEL always wins
+    local r; r=$(DECOMPOSE_MODEL="foo:1b" decompose_model)
+    assert_eq "$r" "foo:1b" "explicit DECOMPOSE_MODEL overrides" || return 1
+    # 2. else the first installed DECOMPOSE_PREFERENCES entry (stub `ollama list`)
+    local orig_ol; orig_ol=$(declare -f ollama 2>/dev/null)
+    ollama() { [[ "$1" == "list" ]] && printf 'NAME ID\ngemma4:31b x\nllama3.1:8b y\n'; }
+    r=$(DECOMPOSE_MODEL="" decompose_model)
+    assert_eq "$r" "llama3.1:8b" "picks first installed preference over the big model" || {
+        [[ -n "$orig_ol" ]] && eval "$orig_ol" || unset -f ollama; return 1; }
+    # 3. none installed → fall back to active_model
+    local orig_am; orig_am=$(declare -f active_model)
+    ollama() { [[ "$1" == "list" ]] && printf 'NAME ID\ngemma4:31b x\n'; }
+    active_model() { echo "gemma4:31b"; }
+    r=$(DECOMPOSE_MODEL="" decompose_model)
+    eval "$orig_am"; [[ -n "$orig_ol" ]] && eval "$orig_ol" || unset -f ollama
+    assert_eq "$r" "gemma4:31b" "falls back to active_model when no preference installed"
+}
+run_test "decompose_model prefers an installed mid model, else active_model" test_decompose_model_picks_mid_model
+
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
     # The critical safety property: on ANY failure (here, a model that
