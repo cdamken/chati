@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.13.0] - 2026-08-02
+
+### Added
+- **Agent mode (`/a`, `/aY`) plans multi-part tasks before acting.** For a
+  request with several parts or that touches many files ("organize Downloads
+  into subfolders, index each file, and group the yusuf files"), the agent now
+  writes a short numbered plan of subtasks first, then works them one `[EXEC:]`
+  at a time and doesn't stop until every step is done. Ported from chati-gh's
+  task-decomposition (#27) so a big instruction no longer loses a part midway.
+  Single simple requests are unchanged (no plan, straight to the command).
+
 ## [1.12.1] - 2026-08-02
 
 ### Changed

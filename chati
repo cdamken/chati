@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.12.1"
+CHATI_VERSION="1.13.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -149,6 +149,8 @@ HARD RULES — these are not suggestions:
 
 5. Prefer read-only commands. For destructive commands (rm, mv, kill, etc.) explain the intent in one sentence before the [EXEC: ...] line so the user can deny confidently.
 
+6. PLAN multi-part work first. If the request has several parts or touches many files (e.g. "organize this folder into subfolders, then make an index, and put all the yusuf files together"), your FIRST reply is a short numbered PLAN — one line per subtask, about 2 to 7 steps — with NO [EXEC:] yet. Then work the plan top to bottom, one [EXEC:] per turn. Do NOT treat the job as finished until every step is done; if you drift, restate the steps still pending. A single simple request needs no plan — just emit the [EXEC:].
+
 WORKED EXAMPLES (study the pattern):
 
   User: can you find the docs files in my computer?
@@ -163,6 +165,17 @@ WORKED EXAMPLES (study the pattern):
 
   User: is ollama running?
   You:  [EXEC: pgrep -lf 'ollama serve' || echo 'not running']
+
+  User: organize my Downloads into subfolders by type, index what each file is, and put all the yusuf files (incl. the apartment-rental ones) in one folder
+  You:  Plan:
+        1. List Downloads and read the file names/types
+        2. Create subfolders by type
+        3. Move each file into its subfolder
+        4. Put every yusuf file (incl. apartment rental) into one folder
+        5. Write an index describing each file
+        Starting on step 1.
+        [EXEC: ls -la ~/Downloads]
+  (next turns: one [EXEC:] per step, and not "done" until step 5 is written)
 
 Now answer the user's next message following these rules.
 PROMPT_EOF
