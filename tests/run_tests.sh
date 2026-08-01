@@ -795,6 +795,16 @@ test_agent_prompt_shape() {
 }
 run_test "agent_capability_prompt contains the required sections" test_agent_prompt_shape
 
+test_agent_prompt_plans_multipart() {
+    # The task-decomposition rule (ported from chati-gh #27): multi-part work
+    # gets a numbered plan first, then one step at a time.
+    local r; r=$(agent_capability_prompt)
+    assert_match "$r" "PLAN multi-part work first" "planning rule present" \
+        && assert_match "$r" "numbered PLAN" "asks for a numbered plan" \
+        && assert_match "$r" "not \"done\" until step 5" "plan-completion example present"
+}
+run_test "agent_capability_prompt tells the agent to plan multi-part tasks" test_agent_prompt_plans_multipart
+
 # --- extract_exec_cmd ---
 test_exec_simple() {
     local r; r=$(extract_exec_cmd "[EXEC: ls -la ~]")
