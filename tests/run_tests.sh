@@ -824,6 +824,16 @@ test_ola_stream_thinking_silent_without_reasoning() {
 }
 run_test "ola_stream_thinking is silent when there is no reasoning" test_ola_stream_thinking_silent_without_reasoning
 
+# --- model_can_think capability parse (via Ollama /api/show JSON) ---
+test_json_has_thinking() {
+    printf '%s' '{"capabilities":["tools","thinking","completion"]}' | _json_has_thinking || return 1
+    printf '%s' '{"capabilities":["completion","tools"]}' | _json_has_thinking && return 1
+    printf '%s' '{}' | _json_has_thinking && return 1        # no capabilities key -> false
+    printf '%s' 'not json' | _json_has_thinking && return 1  # garbage -> false, never crashes
+    return 0
+}
+run_test "_json_has_thinking detects the thinking capability from /api/show JSON" test_json_has_thinking
+
 # --- extract_exec_cmd ---
 test_exec_simple() {
     local r; r=$(extract_exec_cmd "[EXEC: ls -la ~]")

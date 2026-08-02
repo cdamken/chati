@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.14.1] - 2026-08-02
+
+### Fixed
+- **`/think` now detects reasoning models reliably.** The capability gate parsed
+  `ollama show` text, whose layout shifts between CLI/server versions — on a
+  client≠server setup it wrongly reported "no thinking" for capable models
+  (deepseek-r1, gemma4), so `/think` refused to turn on. It now asks Ollama's
+  JSON API (`/api/show` capabilities) via `model_can_think`, and stays lenient
+  if the check itself cannot run so a capable model is never wrongly blocked.
+
 ## [1.14.0] - 2026-08-02
 
 ### Added
