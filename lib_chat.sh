@@ -280,6 +280,28 @@ ola_stream_thinking() {
         printf '\033[0m\n'; }                 # reset color, end the block
 }
 
+# True (exit 0) if the JSON on stdin (an Ollama /api/show response) lists the
+# "thinking" capability. Split out so it can be unit-tested without a network
+# call.
+_json_has_thinking() {
+    jq -e 'any((.capabilities // [])[]; . == "thinking")' >/dev/null 2>&1
+}
+
+# Does <model> expose a reasoning/thinking channel? Asks Ollama's JSON API
+# (/api/show) rather than parsing `ollama show` text, whose layout shifts
+# between CLI/server versions (that text-parse wrongly reported "no thinking"
+# for capable models like deepseek-r1 / gemma4 on a client≠server setup).
+# Returns 0 if the model lists "thinking", 1 if it clearly does not, and 0
+# (lenient) when the check itself could not run — so a capable model is never
+# wrongly blocked.
+model_can_think() {
+    local model="$1" caps
+    caps=$(curl -s --max-time 5 "${OLLAMA_API:-http://localhost:11434}/api/show" \
+             --data "$(jq -nc --arg m "$model" '{model:$m}')" 2>/dev/null)
+    [[ -z "$caps" ]] && return 0            # unreachable / no answer -> don't block
+    printf '%s' "$caps" | _json_has_thinking
+}
+
 # Log messages with timestamps to $LOG_FILE. Stays quiet on success so it
 # can be sprinkled anywhere without polluting output.
 log_chat() {

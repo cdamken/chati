@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.14.0"
+CHATI_VERSION="1.14.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -1121,9 +1121,10 @@ while true; do
                 else
                     # Only reasoning models have a thinking channel; asking a
                     # plain model to think can error and would show nothing.
-                    # Ollama reports the capability, so gate on it.
+                    # Gate on Ollama's JSON capability (model_can_think), which
+                    # is stable across CLI/server versions.
                     think_m=$(active_model)
-                    if ollama show "$think_m" 2>/dev/null | grep -qiw 'thinking'; then
+                    if model_can_think "$think_m"; then
                         THINK_MODE="ON"
                         echo "💭 Thinking: ON — reasoning shows in gray, then the answer ($think_m)"
                     else
