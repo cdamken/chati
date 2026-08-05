@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.11.1 - Ollama-Centric Chat Interface
+# Chati v1.14.1 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -658,6 +658,54 @@ ocr_collect_files() {
     [[ ${#hits[@]} -gt 0 ]] && printf '%s\n' "${hits[@]}"
 }
 
+# OCR a list of image/PDF files via docr and PRINT the combined extracted
+# text to stdout (with a "=== filename ===" header per file). Progress and
+# warnings go to stderr so the captured stdout stays clean text. Shared by
+# the /ocr command and the automatic detection in the send path (#21).
+ocr_files_to_text() {
+    local -a files=("$@")
+    local f base ocr_out nl=$'\n' combined=""
+    (( ${#files[@]} > 1 )) && echo "📄 OCR on ${#files[@]} files in $(dirname "${files[0]}")..." >&2
+    for f in "${files[@]}"; do
+        (( ${#files[@]} == 1 )) && echo "📄 OCR on $f..." >&2
+        "$DOCR_CMD" "$f" > /dev/null
+        # Match by LITERAL prefix, not a find -name glob: a source name
+        # with [ ] * ? would be misread as a glob pattern and silently
+        # find nothing (→ "no text" on a file that OCR'd fine). The
+        # quoted "ocr_$base" makes the [[ ]] comparison literal; only the
+        # trailing * is a wildcard.
+        base=$(basename "${f%.*}")
+        ocr_out=$(find "$(dirname "$f")/OCR_OUTPUTS" -type f -name '*.txt' -newer "$f" 2>/dev/null \
+            | while IFS= read -r p; do [[ "$(basename "$p")" == "ocr_$base"* ]] && printf '%s\n' "$p"; done \
+            | head -n 1)
+        if [[ -n "$ocr_out" ]]; then
+            combined+="${nl}=== $(basename "$f") ===${nl}$(cat "$ocr_out")${nl}"
+        else
+            echo "   ⚠️  No text extracted from $(basename "$f")" >&2
+        fi
+    done
+    printf '%s' "$combined"
+}
+
+# Scan a chat message for tokens that are paths to EXISTING image/PDF files
+# and print them, one per line. Backslash-escaped spaces (how Terminal
+# drag-and-drop and tab-completion quote a path) are preserved so a dropped
+# "~/My Scans/factura.pdf" stays a single token. Only real, on-disk,
+# OCR-able files are returned — a bare mention of ".pdf" with no such file
+# matches nothing, so normal prose never triggers OCR. Powers auto-OCR (#21).
+detect_ocrable_in_msg() {
+    local msg="$1" sentinel=$'\x01' tok p
+    msg="${msg//\\ /$sentinel}"           # protect escaped spaces before splitting
+    for tok in $msg; do
+        tok="${tok//$sentinel/ }"         # restore the spaces
+        tok="${tok#\"}"; tok="${tok%\"}"  # strip surrounding double quotes
+        tok="${tok#\'}"; tok="${tok%\'}"  # …and single quotes
+        tok="${tok%[.,;:]}"               # …and trailing sentence punctuation
+        p=$(expand_path "$tok")
+        [[ -f "$p" ]] && ocr_is_ocrable "$p" && printf '%s\n' "$p"
+    done
+}
+
 # Internal 'ocr': OCR one file, a folder of files, or a glob, then send
 # the combined extracted text to the model for analysis.
 macro_ocr() {
@@ -676,27 +724,7 @@ macro_ocr() {
         return 1
     fi
 
-    (( ${#files[@]} > 1 )) && echo "📄 OCR on ${#files[@]} files in $(dirname "${files[0]}")..."
-    local combined="" ocr_out nl=$'\n'
-    for f in "${files[@]}"; do
-        (( ${#files[@]} == 1 )) && echo "📄 OCR on $f..."
-        "$DOCR_CMD" "$f" > /dev/null
-        # Match by LITERAL prefix, not a find -name glob: a source name
-        # with [ ] * ? would be misread as a glob pattern and silently
-        # find nothing (→ "no text" on a file that OCR'd fine). The
-        # quoted "ocr_$base" makes the [[ ]] comparison literal; only the
-        # trailing * is a wildcard.
-        local base; base=$(basename "${f%.*}")
-        ocr_out=$(find "$(dirname "$f")/OCR_OUTPUTS" -type f -name '*.txt' -newer "$f" 2>/dev/null \
-            | while IFS= read -r p; do [[ "$(basename "$p")" == "ocr_$base"* ]] && printf '%s\n' "$p"; done \
-            | head -n 1)
-        if [[ -n "$ocr_out" ]]; then
-            combined+="${nl}=== $(basename "$f") ===${nl}$(cat "$ocr_out")${nl}"
-        else
-            echo "   ⚠️  No text extracted from $(basename "$f")"
-        fi
-    done
-
+    local combined; combined=$(ocr_files_to_text "${files[@]}")
     if [[ -n "$combined" ]]; then
         send_and_capture "Analyze scanned text:${combined}"
     else
@@ -769,7 +797,9 @@ Input & Files:
 /batch (/s) [range] <file>  Batch: send each line of <file> separately.
                             Example: /batch 10-20 Stocks.txt
 /ocr <file|folder|glob>     OCR an image/PDF, a whole folder of them,
-                            or a glob, then analyze the text.
+                            or a glob, then analyze the text. (Just naming
+                            an image/PDF path in a normal message also OCRs
+                            it automatically — set CHATI_AUTO_OCR=0 to opt out.)
 /url <link>                 Analyze webpage content.
 
 Mode Toggles:
@@ -1198,6 +1228,25 @@ while true; do
     fi
 
     # --- Non-command: build the message and send it. ---
+
+    # Auto-OCR (#21): if the message names image/PDF files that exist on disk,
+    # extract their text with docr and fold it into the prompt — so "resume
+    # ~/Downloads/factura.pdf" (or a drag-and-dropped file) just works, no
+    # /ocr needed. Only real, on-disk, OCR-able paths trigger it, so ordinary
+    # prose is untouched. Disable with CHATI_AUTO_OCR=0; /ocr still works too.
+    if [[ "${CHATI_AUTO_OCR:-1}" != 0 ]]; then
+        _ocr_files=()
+        while IFS= read -r _f; do [[ -n "$_f" ]] && _ocr_files+=("$_f"); done \
+            < <(detect_ocrable_in_msg "$msg")
+        if (( ${#_ocr_files[@]} )); then
+            echo "📎 Detected ${#_ocr_files[@]} image/PDF file(s) — reading with docr…"
+            _ocr_text=$(ocr_files_to_text "${_ocr_files[@]}")
+            if [[ -n "$_ocr_text" ]]; then
+                _nl=$'\n'
+                msg="${msg}${_nl}${_nl}[Text extracted from the attached file(s) via OCR — use it to answer]:${_ocr_text}"
+            fi
+        fi
+    fi
 
     # Keep the raw question for conversation memory (augment_message
     # rewraps $msg with research notes; we want the clean text).
