@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.15.0 - Ollama-Centric Chat Interface
+# Chati v1.15.1 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.15.0"
+CHATI_VERSION="1.15.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -724,8 +724,25 @@ detect_ocrable_in_msg() {
         tok="${tok#\'}"; tok="${tok%\'}"  # …and single quotes
         tok="${tok%[.,;:]}"               # …and trailing sentence punctuation
         p=$(expand_path "$tok")
-        [[ -f "$p" ]] && ocr_is_ocrable "$p" && printf '%s\n' "$p"
+        if [[ -f "$p" ]] && ocr_is_ocrable "$p"; then
+            printf '%s\n' "$p"
+        elif [[ -d "$p" ]]; then
+            # A named folder → the image/PDF files inside it (same collector /ocr
+            # uses), so "lee los pdfs de ~/Downloads/facturas" works too.
+            ocr_collect_files "$p"
+        fi
     done
+}
+
+# True if the message reads like a request to READ a document/image but no
+# usable path was found — used to give a helpful hint (name the path or /ocr)
+# instead of letting the model hallucinate that it "can't do OCR". Matches a
+# doc/OCR keyword together with a read/verb cue, so plain chatter about a PDF
+# doesn't trip it.
+msg_wants_ocr() {
+    local m; m=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    [[ "$m" =~ (pdf|imagen|imágenes|imagenes|image|foto|photo|escane|escán|scan|ocr|docr|factura|documento|document|recibo|contrato) ]] || return 1
+    [[ "$m" =~ (lee|leer|leé|lé|read|abre|abrir|open|resume|resumir|resumí|summar|analiz|analyz|extrae|extraer|extract|transcrib|escanea|scan|revisa|revisar|check) ]]
 }
 
 # Internal 'ocr': OCR one file, a folder of files, or a glob, then send
@@ -1260,13 +1277,25 @@ while true; do
         _ocr_files=()
         while IFS= read -r _f; do [[ -n "$_f" ]] && _ocr_files+=("$_f"); done \
             < <(detect_ocrable_in_msg "$msg")
-        if (( ${#_ocr_files[@]} )); then
+        _ocr_max="${CHATI_AUTO_OCR_MAX:-8}"
+        if (( ${#_ocr_files[@]} > _ocr_max )); then
+            # docr is slow (~a minute per file); don't silently OCR a huge
+            # folder. Tell the user to opt in explicitly.
+            echo "📎 Found ${#_ocr_files[@]} image/PDF files — too many to OCR automatically."
+            echo "   Run  /ocr <file|folder|glob>  to read them all, or name specific files."
+        elif (( ${#_ocr_files[@]} )); then
             echo "📎 Detected ${#_ocr_files[@]} image/PDF file(s) — reading with docr…"
             _ocr_text=$(ocr_files_to_text "${_ocr_files[@]}")
             if [[ -n "$_ocr_text" ]]; then
                 _nl=$'\n'
                 msg="${msg}${_nl}${_nl}[Text extracted from the attached file(s) via OCR — use it to answer]:${_ocr_text}"
             fi
+        elif msg_wants_ocr "$msg"; then
+            # You clearly want a document read but named no path chati can find.
+            # Point the way instead of letting the model claim it "can't do OCR".
+            echo "💡 To read an image/PDF I run docr on it — I just need the path."
+            echo "   Name the file (e.g. ~/Downloads/factura.pdf), drag it into the"
+            echo "   terminal, name a folder, or use  /ocr <file|folder>."
         fi
     fi
 

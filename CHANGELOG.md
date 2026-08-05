@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.15.1] - 2026-08-05
+
+### Changed
+- **Auto-OCR is more forgiving, and never leaves the model to bluff (#21).**
+  Follow-up to 1.15.0's auto-OCR: (1) naming a **folder** now OCRs the image/PDF
+  files inside it (`lee los pdfs de ~/Downloads/facturas`), not just individual
+  files; (2) a safety cap (`CHATI_AUTO_OCR_MAX`, default 8) means a huge folder
+  isn't silently OCR'd — chati points you to `/ocr` instead; (3) when your
+  message clearly asks to **read a document but names no path chati can find**,
+  it now prints a short hint (name the file, drag it in, or use `/ocr`) instead
+  of letting a small model hallucinate that it "can't do OCR." Triggers only on a
+  document/OCR keyword **plus** a read/analyze cue, so casual mentions of a PDF
+  don't trip it.
+
 ## [1.15.0] - 2026-08-05
 
 Consolidated release of three merged PRs (#11, #14, #22).
