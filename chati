@@ -23,15 +23,37 @@ CHATI_VERSION="1.14.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
-# Parse CLI flags up-front so `chati --help` and `chati --version`
-# work without entering the REPL.
+# Parse CLI flags up-front so `chati --help`, `chati --version` and the
+# headless `chati search` subcommand work without entering the REPL.
 case "${1:-}" in
     -h|--help)
-        echo "Usage: chati [-h|--help] [-v|--version]"
+        echo "Usage: chati [-h|--help] [-v|--version] [search <query...>]"
         echo "Interactive Ollama chat. Type /h once inside for command list."
+        echo ""
+        echo "  search <query...>   Headless web search via the SearXNG backend:"
+        echo "                      prints results and exits (no REPL). For scripts,"
+        echo "                      pipelines and other machines/agents. Needs SEARXNG_URLS"
+        echo "                      configured in .env (same backend as the /web toggle)."
         exit 0 ;;
     -v|--version)
         show_version; exit 0 ;;
+    search|--search)
+        # Headless one-shot web search. Reuses lib_web.sh's web_search (sourced
+        # via lib_chat.sh above), so it hits the exact same SearXNG endpoints and
+        # formatting as the interactive /web pipeline — no REPL, no LLM call.
+        shift
+        if [[ $# -eq 0 ]]; then
+            echo "Usage: chati search <query...>" >&2
+            echo "Headless web search via chati's SearXNG backend; prints results and exits." >&2
+            exit 2
+        fi
+        if ! declare -f web_search >/dev/null 2>&1; then
+            echo "chati: web search unavailable (lib_web.sh not loaded)." >&2
+            exit 1
+        fi
+        web_search "$*"
+        exit $?
+        ;;
 esac
 
 # --- HISTORY MANAGEMENT ---
