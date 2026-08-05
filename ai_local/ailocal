@@ -259,23 +259,61 @@ stopwebui() {
     echo "OpenWebUI stopped (forced)"
 }
 
+# True if Ollama answers on a NON-loopback address — i.e. actually reachable
+# from other machines, not just localhost. We test the Mac's own LAN and
+# Tailscale IPs: hitting them exercises the real external bind (a process bound
+# only to 127.0.0.1, or to an IPv6-only socket that rejects IPv4 like the one
+# that left heather unreachable over Tailscale, fails here). If the Mac has no
+# external address at all (offline), reachability is moot — return 0 so we don't
+# pointlessly restart.
+ollama_lan_reachable() {
+    local addr found=1
+    for addr in \
+        "$(ipconfig getifaddr en0 2>/dev/null)" \
+        "$(ipconfig getifaddr en1 2>/dev/null)" \
+        "$(tailscale ip -4 2>/dev/null | head -1)"; do
+        [[ -z "$addr" ]] && continue
+        found=0
+        curl -fsS --max-time 3 "http://$addr:11434/api/version" >/dev/null 2>&1 && return 0
+    done
+    [[ "$found" -eq 1 ]] && return 0    # no external address → can't test → skip
+    return 1
+}
+
 startollama() {
-    if pgrep -f "$OLLAMA_PROC" > /dev/null; then
-        echo "Ollama is already running"
-        return 0
+    # LAN exposure (persisted via `ailocal lan on`): the marker is AUTHORITATIVE
+    # and applied on EVERY start — including autostart at login — so once LAN is
+    # on, other machines can always reach Ollama. Set OLLAMA_HOST from the marker
+    # directly (not `${OLLAMA_HOST:-…}`): a stale value inherited from the login
+    # environment must not win over the user's persisted choice.
+    if [[ -f "$LAN_MARKER" ]]; then
+        OLLAMA_HOST="$(cat "$LAN_MARKER" 2>/dev/null)"
+        [[ -z "$OLLAMA_HOST" ]] && OLLAMA_HOST="0.0.0.0:11434"
+        export OLLAMA_HOST
+        launchctl setenv OLLAMA_HOST "$OLLAMA_HOST" 2>/dev/null || true
     fi
+
+    if pgrep -f "$OLLAMA_PROC" > /dev/null; then
+        # Already up — but if LAN is meant to be on and this process is NOT
+        # reachable off-localhost, restart it so the bind actually applies.
+        # Without this, a daemon that came up before the marker existed (or with
+        # a wedged/IPv6-only socket) stays unreachable forever across autostarts
+        # — exactly what made heather invisible to rerun over Tailscale.
+        if [[ -f "$LAN_MARKER" ]] && ! ollama_lan_reachable; then
+            echo "Ollama is up but not reachable on the LAN — restarting to apply the bind…"
+            stopollama >/dev/null 2>&1
+        else
+            echo "Ollama is already running"
+            return 0
+        fi
+    fi
+
     # Apple Silicon perf tuning (Homebrew ollama formula's recommended flags):
     # flash attention + q8 KV cache → less memory and faster inference,
     # especially for large models. GPU/MLX acceleration itself is automatic.
     # Override by exporting these before starting.
     export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
     export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
-    # LAN exposure (persisted via `ailocal lan on`): bind all interfaces so
-    # other machines can reach Ollama. The marker makes it survive reboots.
-    if [[ -f "$LAN_MARKER" ]]; then
-        export OLLAMA_HOST="${OLLAMA_HOST:-$(cat "$LAN_MARKER" 2>/dev/null || echo 0.0.0.0:11434)}"
-        launchctl setenv OLLAMA_HOST "$OLLAMA_HOST" 2>/dev/null || true
-    fi
     # </dev/null: don't hold the caller's stdin/pipe open (see startwebui) —
     # keeps `ailocal start` from hanging when run non-interactively/piped.
     nohup ollama serve </dev/null > "$LOG_DIR/ollama.log" 2>&1 &
