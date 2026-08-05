@@ -722,6 +722,7 @@ eval "$(awk '/^macro_fola\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^ocr_is_ocrable\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^ocr_collect_files\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^detect_ocrable_in_msg\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^msg_wants_ocr\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 
 # --- ocr_collect_files (file / directory / glob) ---
 test_ocr_collect_single_file() {
@@ -800,6 +801,34 @@ test_detect_ocr_non_ocrable() {
     assert_eq "$r" "" "existing .txt is not OCR-able → nothing"
 }
 run_test "detect_ocrable_in_msg skips non-image/PDF files" test_detect_ocr_non_ocrable
+
+test_detect_ocr_folder() {
+    # Naming a folder yields its image/PDF files (not the .txt).
+    local d="$SANDBOX/facturas"; mkdir -p "$d"
+    : > "$d/a.pdf"; : > "$d/b.png"; : > "$d/notas.txt"
+    local r; r=$(detect_ocrable_in_msg "lee los pdfs de $d" | sort | tr '\n' ',')
+    assert_eq "$r" "$d/a.pdf,$d/b.png," "folder → its image/PDF files"
+}
+run_test "detect_ocrable_in_msg expands a named folder" test_detect_ocr_folder
+
+test_msg_wants_ocr_intent() {
+    msg_wants_ocr "Para leer los pdfs tiene que usar el docr, si puedes?" \
+        || { echo "should detect read-a-pdf intent" >&2; return 1; }
+    msg_wants_ocr "can you read the invoice pdf" \
+        || { echo "should detect english intent" >&2; return 1; }
+}
+run_test "msg_wants_ocr detects a read-document request" test_msg_wants_ocr_intent
+
+test_msg_wants_ocr_no_false_positive() {
+    # Casual mention of a pdf, or an unrelated 'read', must NOT trip the hint.
+    if msg_wants_ocr "el pdf estaba genial, gracias"; then
+        echo "casual pdf mention should not trigger" >&2; return 1
+    fi
+    if msg_wants_ocr "read me a poem about the sea"; then
+        echo "unrelated read should not trigger" >&2; return 1
+    fi
+}
+run_test "msg_wants_ocr does not fire on casual mentions" test_msg_wants_ocr_no_false_positive
 
 test_normalize_for_decomp_arrow() {
     local r; r=$(normalize_for_decomp "3M <--> US88579Y1010")
