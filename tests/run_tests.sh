@@ -723,6 +723,7 @@ eval "$(awk '/^ocr_is_ocrable\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^ocr_collect_files\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^detect_ocrable_in_msg\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^msg_wants_ocr\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^detect_ocrable_in_history\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 
 # --- ocr_collect_files (file / directory / glob) ---
 test_ocr_collect_single_file() {
@@ -829,6 +830,27 @@ test_msg_wants_ocr_no_false_positive() {
     fi
 }
 run_test "msg_wants_ocr does not fire on casual mentions" test_msg_wants_ocr_no_false_positive
+
+test_detect_ocr_history_reuses_earlier_path() {
+    # A folder named a few turns ago is reused even when the latest turns don't
+    # mention it — so "read the pdfs" needn't repeat the path.
+    local d="$SANDBOX/hist-facturas"; mkdir -p "$d"; : > "$d/a.pdf"; : > "$d/b.png"
+    local mf="$SANDBOX/hist-messages.jsonl"
+    jq -nc --arg d "$d" '{role:"user",content:("organiza mi carpeta " + $d)}'  >  "$mf"
+    jq -nc '{role:"assistant",content:"listo"}'                                  >> "$mf"
+    jq -nc '{role:"user",content:"gracias"}'                                     >> "$mf"
+    local r; r=$(MESSAGES_FILE="$mf" detect_ocrable_in_history | sort | tr '\n' ',')
+    assert_eq "$r" "$d/a.pdf,$d/b.png," "reuses the folder named earlier"
+}
+run_test "detect_ocrable_in_history reuses an earlier-mentioned path" test_detect_ocr_history_reuses_earlier_path
+
+test_detect_ocr_history_empty_when_none() {
+    local mf="$SANDBOX/hist-none.jsonl"
+    jq -nc '{role:"user",content:"hola que tal"}' > "$mf"
+    local r; r=$(MESSAGES_FILE="$mf" detect_ocrable_in_history)
+    assert_eq "$r" "" "no path in history → nothing"
+}
+run_test "detect_ocrable_in_history returns nothing when no path was mentioned" test_detect_ocr_history_empty_when_none
 
 test_normalize_for_decomp_arrow() {
     local r; r=$(normalize_for_decomp "3M <--> US88579Y1010")

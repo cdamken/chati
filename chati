@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.15.1 - Ollama-Centric Chat Interface
+# Chati v1.15.2 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.15.1"
+CHATI_VERSION="1.15.2"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -745,6 +745,24 @@ msg_wants_ocr() {
     [[ "$m" =~ (lee|leer|leé|lé|read|abre|abrir|open|resume|resumir|resumí|summar|analiz|analyz|extrae|extraer|extract|transcrib|escanea|scan|revisa|revisar|check) ]]
 }
 
+# Look BACK through this session's recent user turns for an image/PDF path or
+# folder the user named earlier, and print the files from the most recent turn
+# that has any. Lets "lee los pdfs" reuse a path given a few messages ago
+# instead of forcing the user to repeat it (#21). Scans only the last handful
+# of user turns so a stale path from long ago doesn't resurface.
+detect_ocrable_in_history() {
+    [[ -f "$MESSAGES_FILE" ]] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    local content found
+    # Most-recent user turns first (tail -r reverses); stop at the first hit.
+    while IFS= read -r content; do
+        [[ -z "$content" ]] && continue
+        found=$(detect_ocrable_in_msg "$content")
+        if [[ -n "$found" ]]; then printf '%s\n' "$found"; return 0; fi
+    done < <(jq -r 'select(.role=="user") | .content' "$MESSAGES_FILE" 2>/dev/null \
+                | tail -n 12 | tail -r)
+}
+
 # Internal 'ocr': OCR one file, a folder of files, or a glob, then send
 # the combined extracted text to the model for analysis.
 macro_ocr() {
@@ -1291,11 +1309,26 @@ while true; do
                 msg="${msg}${_nl}${_nl}[Text extracted from the attached file(s) via OCR — use it to answer]:${_ocr_text}"
             fi
         elif msg_wants_ocr "$msg"; then
-            # You clearly want a document read but named no path chati can find.
-            # Point the way instead of letting the model claim it "can't do OCR".
-            echo "💡 To read an image/PDF I run docr on it — I just need the path."
-            echo "   Name the file (e.g. ~/Downloads/factura.pdf), drag it into the"
-            echo "   terminal, name a folder, or use  /ocr <file|folder>."
+            # No path in THIS message, but you asked to read a document. First
+            # reuse a path/folder you named earlier in this session, so you
+            # don't have to repeat it; only if there's none do we hint.
+            _hist_files=()
+            while IFS= read -r _f; do [[ -n "$_f" ]] && _hist_files+=("$_f"); done \
+                < <(detect_ocrable_in_history)
+            if (( ${#_hist_files[@]} && ${#_hist_files[@]} <= _ocr_max )); then
+                echo "📎 Reusing the ${#_hist_files[@]} image/PDF file(s) you mentioned earlier — reading with docr…"
+                _ocr_text=$(ocr_files_to_text "${_hist_files[@]}")
+                if [[ -n "$_ocr_text" ]]; then
+                    _nl=$'\n'
+                    msg="${msg}${_nl}${_nl}[Text extracted from the file(s) you referred to, via OCR — use it to answer]:${_ocr_text}"
+                fi
+            else
+                # Nothing to go on — point the way instead of letting the model
+                # claim it "can't do OCR".
+                echo "💡 To read an image/PDF I run docr on it — I just need the path."
+                echo "   Name the file (e.g. ~/Downloads/factura.pdf), drag it into the"
+                echo "   terminal, name a folder, or use  /ocr <file|folder>."
+            fi
         fi
     fi
 
