@@ -7,6 +7,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.15.0] - 2026-08-05
+
+Consolidated release of three merged PRs (#11, #14, #22).
+
+### Added
+- **Automatic OCR of images/PDFs you mention (#21, PR #22).** chati now reaches
+  for the `docr` OCR tool on its own: when your message names an image or PDF
+  that exists on disk — typed, tab-completed, or drag-and-dropped (escaped
+  spaces handled) — it OCRs the file and folds the text into the prompt, so
+  *"resume ~/Downloads/factura.pdf"* just works with no `/ocr` step. Conservative
+  by design: only real, on-disk, OCR-able paths (`jpg/jpeg/png/pdf/tif/tiff/bmp/
+  gif/heic`) trigger it, so a bare ".pdf" mention or a `.txt` path never does.
+  Toggle with `CHATI_AUTO_OCR=0`; `/ocr` is unchanged. Extraction is now a shared
+  `ocr_files_to_text` helper used by both paths.
+- **Headless `chati search <query>` (PR #14).** A one-shot subcommand that runs
+  the SearXNG web search and prints results — no REPL, no LLM call — so scripts,
+  pipelines and other machines/agents can pull fresh web facts. Reuses the same
+  `SEARXNG_URLS` round-robin as `/web`. Exit codes: `2` on missing query, `1` if
+  no backend is configured.
+
+### Fixed
+- **A LAN-exposed Ollama is reachable on *every* start, not just after a manual
+  restart (PR #11).** When `ailocal lan on` is set, other machines must always
+  reach Ollama (LAN/Tailscale) — after login autostart and reboots too. Two gaps
+  broke that: `startollama` short-circuited on "already running" without checking
+  the daemon was actually reachable off-localhost (so one that came up before the
+  LAN marker, or with a wedged/IPv6-only socket, stayed invisible forever), and
+  it applied the marker as `${OLLAMA_HOST:-…}`, letting a stale value win. Now the
+  marker is authoritative on every start, and if LAN is on but the daemon isn't
+  reachable on the Mac's LAN/Tailscale address, `startollama` restarts it to apply
+  the bind. New `ollama_lan_reachable` helper probes the real external addresses.
+
 ## [1.14.1] - 2026-08-02
 
 ### Fixed
