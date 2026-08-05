@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.15.2] - 2026-08-05
+
+### Changed
+- **Auto-OCR reuses a path you gave earlier in the session (#21).** If you name
+  a PDF/image (or a folder) and then a few turns later say *"lee los pdfs"* or
+  *"resume ese documento"* without repeating the path, chati now looks back
+  through the recent conversation, finds the most recent image/PDF path or
+  folder you mentioned, and OCRs it — instead of asking you to type it again.
+  Scans only the last handful of your turns (so a stale path from long ago
+  doesn't resurface) and still respects `CHATI_AUTO_OCR_MAX`; if it finds
+  nothing, it falls back to the hint from 1.15.1.
+
 ## [1.15.1] - 2026-08-05
 
 ### Changed
