@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.12.0] - 2026-08-01
+
+### Added
+- **Automatic OCR of images/PDFs you mention (#21).** chati now understands
+  that it has the `docr` OCR tool and reaches for it on its own: when your
+  message names an image or PDF that exists on disk — typed, tab-completed, or
+  drag-and-dropped (escaped spaces handled) — chati runs `docr` on it and folds
+  the extracted text into the prompt, so *"resume ~/Downloads/factura.pdf"* just
+  works with no `/ocr` step. It's conservative: only real, on-disk, OCR-able
+  paths trigger it (`jpg/jpeg/png/pdf/tif/tiff/bmp/gif/heic`), so a bare mention
+  of ".pdf" in prose, or a `.txt` path, never does. Turn it off with
+  `CHATI_AUTO_OCR=0`; the `/ocr` command is unchanged. Internally the OCR
+  extraction is now a shared `ocr_files_to_text` helper used by both paths.
+
 ## [1.11.1] - 2026-07-30
 
 ### Fixed

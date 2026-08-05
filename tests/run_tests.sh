@@ -675,6 +675,7 @@ eval "$(awk '/^agent_cmd_is_safe\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^macro_fola\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^ocr_is_ocrable\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^ocr_collect_files\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^detect_ocrable_in_msg\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 
 # --- ocr_collect_files (file / directory / glob) ---
 test_ocr_collect_single_file() {
@@ -716,6 +717,43 @@ test_ocr_collect_missing() {
     assert_eq "$r" "" "missing path → empty"
 }
 run_test "ocr_collect_files returns nothing for a missing path" test_ocr_collect_missing
+
+# --- detect_ocrable_in_msg (auto-OCR path detection, #21) ---
+test_detect_ocr_existing_pdf() {
+    local f="$SANDBOX/factura.pdf"; : > "$f"
+    local r; r=$(detect_ocrable_in_msg "resume $f por favor")
+    assert_eq "$r" "$f" "existing pdf in a sentence is detected"
+}
+run_test "detect_ocrable_in_msg finds an existing PDF path" test_detect_ocr_existing_pdf
+
+test_detect_ocr_trailing_punct() {
+    local f="$SANDBOX/foto.png"; : > "$f"
+    local r; r=$(detect_ocrable_in_msg "mira esto: $f.")
+    assert_eq "$r" "$f" "trailing period is trimmed"
+}
+run_test "detect_ocrable_in_msg trims trailing punctuation" test_detect_ocr_trailing_punct
+
+test_detect_ocr_escaped_space() {
+    local d="$SANDBOX/My Scans"; mkdir -p "$d"; : > "$d/recibo.jpg"
+    # As Terminal drag-and-drop / tab-completion quote it:
+    local r; r=$(detect_ocrable_in_msg "lee $SANDBOX/My\\ Scans/recibo.jpg")
+    assert_eq "$r" "$d/recibo.jpg" "backslash-escaped space stays one token"
+}
+run_test "detect_ocrable_in_msg handles escaped-space paths" test_detect_ocr_escaped_space
+
+test_detect_ocr_bare_mention() {
+    # A mention of ".pdf" with no such file must NOT trigger.
+    local r; r=$(detect_ocrable_in_msg "quiero exportar un informe a .pdf mañana")
+    assert_eq "$r" "" "bare extension mention → nothing"
+}
+run_test "detect_ocrable_in_msg ignores bare extension mentions" test_detect_ocr_bare_mention
+
+test_detect_ocr_non_ocrable() {
+    local f="$SANDBOX/notas.txt"; : > "$f"
+    local r; r=$(detect_ocrable_in_msg "lee $f")
+    assert_eq "$r" "" "existing .txt is not OCR-able → nothing"
+}
+run_test "detect_ocrable_in_msg skips non-image/PDF files" test_detect_ocr_non_ocrable
 
 test_normalize_for_decomp_arrow() {
     local r; r=$(normalize_for_decomp "3M <--> US88579Y1010")
