@@ -852,6 +852,24 @@ test_detect_ocr_history_empty_when_none() {
 }
 run_test "detect_ocrable_in_history returns nothing when no path was mentioned" test_detect_ocr_history_empty_when_none
 
+# --- log_finetune_record (fine-tuning JSONL log, #12) ---
+test_finetune_log_writes_record() {
+    echo "sess-ft" > "$PREVIOUS_FILE"
+    CHATI_FINETUNE_LOG=1 log_finetune_record "do X" "do X + context" "did X"
+    local f="$CHATI_DATA_HOME/finetune/sess-ft.jsonl"
+    assert_file_exists "$f" || return 1
+    local r; r=$(jq -r '.instruction + "|" + .context_sent + "|" + .response' "$f")
+    assert_eq "$r" "do X|do X + context|did X" "record fields captured"
+}
+run_test "log_finetune_record writes a JSONL turn record" test_finetune_log_writes_record
+
+test_finetune_log_disabled() {
+    echo "sess-off" > "$PREVIOUS_FILE"
+    CHATI_FINETUNE_LOG=0 log_finetune_record "x" "y" "z"
+    assert_file_absent "$CHATI_DATA_HOME/finetune/sess-off.jsonl"
+}
+run_test "log_finetune_record honours CHATI_FINETUNE_LOG=0" test_finetune_log_disabled
+
 test_normalize_for_decomp_arrow() {
     local r; r=$(normalize_for_decomp "3M <--> US88579Y1010")
     assert_eq "$r" "3M US88579Y1010" "arrow merge"

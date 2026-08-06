@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.16.0 - Ollama-Centric Chat Interface
+# Chati v1.17.0 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.16.0"
+CHATI_VERSION="1.17.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -174,6 +174,8 @@ HARD RULES — these are not suggestions:
 
 6. PLAN multi-part work first. If the request has several parts or touches many files (e.g. "organize this folder into subfolders, then make an index, and put all the yusuf files together"), your FIRST reply is a short numbered PLAN — one line per subtask, about 2 to 7 steps — with NO [EXEC:] yet. Then work the plan top to bottom, one [EXEC:] per turn. Do NOT treat the job as finished until every step is done; if you drift, restate the steps still pending. A single simple request needs no plan — just emit the [EXEC:].
 
+7. ACT, don't DRAFT. To create, append to, or edit a file, emit the COMMAND that makes the change — never paste the file's new contents as prose, markdown, or a ```code fence``` and expect that to count as doing it. Writing a file IS a shell action: use printf / cat / tee / sed. If you catch yourself typing out a block of file content, stop and turn it into a [EXEC: ...] that writes that content instead.
+
 WORKED EXAMPLES (study the pattern):
 
   User: can you find the docs files in my computer?
@@ -199,6 +201,15 @@ WORKED EXAMPLES (study the pattern):
         Starting on step 1.
         [EXEC: ls -la ~/Downloads]
   (next turns: one [EXEC:] per step, and not "done" until step 5 is written)
+
+  User: add "export PATH=$PATH:~/bin" to my ~/.zshrc
+  You:  [EXEC: printf '\nexport PATH=$PATH:~/bin\n' >> ~/.zshrc]
+
+  User: create ~/notes.md with a TODO heading
+  You:  [EXEC: printf '# TODO\n' > ~/notes.md]
+
+  User: in ~/config.txt change the port from 8080 to 9090
+  You:  [EXEC: sed -i '' 's/8080/9090/g' ~/config.txt]
 
 Now answer the user's next message following these rules.
 PROMPT_EOF
@@ -1302,6 +1313,9 @@ while true; do
 
     # --- Non-command: build the message and send it. ---
 
+    # The clean instruction (before OCR/web augmentation) for the fine-tune log.
+    _ft_instruction="$msg"
+
     # Auto-OCR (#21): if the message names image/PDF files that exist on disk,
     # extract their text with docr and fold it into the prompt — so "resume
     # ~/Downloads/factura.pdf" (or a drag-and-dropped file) just works, no
@@ -1365,8 +1379,16 @@ while true; do
         unset OLA_EXTRA_SYSTEM
     fi
 
+    _ft_logged=0
     while true; do
         send_and_capture "$msg"
+
+        # Fine-tuning log (#12): capture the user turn once — instruction, the
+        # context actually sent, and the reply — before any agent sub-steps.
+        if [[ "$_ft_logged" == 0 ]]; then
+            log_finetune_record "$_ft_instruction" "$msg" "$LAST_RESPONSE"
+            _ft_logged=1
+        fi
 
         # Autonomous tool-use loop.
         if [[ "$AGENT_MODE" == "ON" ]] && agent_cmd=$(extract_exec_cmd "$LAST_RESPONSE"); then
