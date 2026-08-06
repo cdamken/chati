@@ -308,6 +308,31 @@ log_chat() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG_FILE"
 }
 
+# Fine-tuning / training log (#12): append ONE JSONL record per user turn —
+# the instruction, the context essence actually sent to the model, and the
+# reply — to a per-session file under $CHATI_DATA_HOME/finetune/. Separate from
+# conversation_histories (raw memory) so a long chat can later feed a fine-tune
+# without reconstructing it. Off with CHATI_FINETUNE_LOG=0. Args:
+#   $1 instruction (clean user message)  $2 context_sent  $3 response
+log_finetune_record() {
+    [[ "${CHATI_FINETUNE_LOG:-1}" == 0 ]] && return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    local sess dir out
+    sess=$(cat "$PREVIOUS_FILE" 2>/dev/null); [[ -z "$sess" ]] && sess="active"
+    dir="$CHATI_DATA_HOME/finetune"
+    mkdir -p "$dir" 2>/dev/null || return 0
+    out="$dir/${sess}.jsonl"
+    jq -nc \
+        --arg ts "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        --arg session "$sess" \
+        --arg model "$(active_model 2>/dev/null)" \
+        --arg instruction "$1" \
+        --arg context_sent "$2" \
+        --arg response "$3" \
+        '{ts:$ts, session:$session, model:$model, instruction:$instruction, context_sent:$context_sent, response:$response}' \
+        >> "$out" 2>/dev/null || true
+}
+
 # One-time migration (chati ≤1.9.x → 1.10+). Move persistent DATA that used to
 # live INSIDE the checkout ($BASE_DIR) into the stable $CHATI_DATA_HOME, so a
 # future upgrade or re-clone never orphans saved sessions again (#7). It is
