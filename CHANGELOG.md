@@ -7,6 +7,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.16.0] - 2026-08-06
+
+### Changed
+- **Install folder renamed `chat` → `chati`, with automatic migration (#10).**
+  The project began as a Pharia "chat" app and the docs installed it to `~/chat`;
+  it's `chati` now, so the canonical path is **`~/chati`**. On the next deploy the
+  rename happens by itself: `setup.sh` run from an old `~/chat` checkout **moves
+  it to `~/chati` and re-execs** from there (re-pointing the `chati`/`ailocal`
+  PATH links), and the README's get-the-code one-liner does the same `mv` up
+  front. Safe: user data already lives outside the checkout (`~/.local/share/chati`
+  since 1.10), so only code + `.env` + local scratch move; saved sessions are
+  untouched. Docs, the SearXNG installer hint, and internal comments updated to
+  `~/chati`. Internal names (`ola_chat/`, `lib_chat.sh`, `conversation_histories/`)
+  are unchanged — only the install path moved.
+
 ## [1.15.3] - 2026-08-06
 
 ### Changed

@@ -96,5 +96,5 @@ echo "🔎 Verifying import..."
 
 echo ""
 echo "✅ SearXNG installed. Start it with:  ailocal start searxng"
-echo "   Then add it to chati's ~/chat/.env:"
+echo "   Then add it to chati's ~/chati/.env:"
 echo "     SEARXNG_URLS=\"http://127.0.0.1:$PORT, <your-cloud-searxng>\""

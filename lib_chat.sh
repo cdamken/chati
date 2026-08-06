@@ -8,14 +8,13 @@
 # pre-export an override BEFORE sourcing this file and sandbox the whole
 # session into a temp dir. Without this, sourcing the lib would clobber
 # the caller's overrides and any subprocess (mola/ola/...) would write
-# back into the real ~/chat tree.
+# back into the real ~/chati tree.
 #
 # BASE_DIR defaults to the directory this file lives in — i.e. wherever
-# the repo was checked out — NOT a hardcoded $HOME/chat. This is what lets
+# the repo was checked out — NOT a hardcoded $HOME/chati. This is what lets
 # the folder be named/placed however you like (a clone left as
 # ~/chat-system-cli, a worktree, etc.) and still find its sub-tools
-# (ola/mola/lib_web.sh all live beside this file). When the checkout IS
-# at ~/chat the value is identical to before.
+# (ola/mola/lib_web.sh all live beside this file). When the checkout IS# at ~/chati the value is identical.
 export BASE_DIR="${BASE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 # --- PER-MACHINE CONFIG (.env) ---
