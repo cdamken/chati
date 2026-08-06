@@ -60,3 +60,6 @@ backup_inventory_*.md
 portfolio_*.md
 existing_ids.txt
 parse_gbm*.py
+
+# Compiled Apple Vision OCR helper (built by setup.sh from docr/ocr_vision.swift)
+docr/ocrvision

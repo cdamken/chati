@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.18.0] - 2026-08-06
+
+### Added
+- **Apple Vision OCR — much faster and far more accurate on real photos (#28).**
+  chati now picks the best OCR engine per file instead of always shelling out to
+  docr/tesseract:
+  1. **Digital PDFs** (with a text layer) → `pdftotext` (poppler) — instant,
+     lossless, no OCR at all.
+  2. **Images (incl. HEIC/WEBP/AVIF) and scanned PDFs** → **Apple Vision** on
+     macOS, a tiny native helper (`docr/ocr_vision.swift`, compiled by `setup.sh`
+     to `docr/ocrvision`, no Python) using the system's on-device text
+     recognition. Reads HEIC directly (no ImageMagick conversion) and is *far*
+     better than tesseract on angled/glare/low-light photos.
+  3. **Fallback** → docr/tesseract when Vision isn't available (non-macOS, or the
+     helper didn't build).
+  Measured on a real HEIC photo of a screen: **Vision 2.3 s, usable text** vs
+  **tesseract 8.6 s producing garbage** (it read the angled photo rotated).
+  Force an engine with `CHATI_OCR_ENGINE=auto|vision|tesseract`; set Vision's
+  languages with `CHATI_OCR_LANGS` (default `es-ES en-US de-DE`). New OCR-able
+  formats: WEBP, AVIF, HEIF. `poppler` added to the Brewfile. The `/ocr` command
+  and auto-OCR both use the new engine selection.
+
 ## [1.17.0] - 2026-08-06
 
 ### Added

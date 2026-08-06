@@ -339,6 +339,22 @@ else
     warn "Couldn't link into $BREW_BIN — run them as ./chati and ./ai_local/ailocal, or add the repo to your PATH."
 fi
 
+# ---- 5c. Apple Vision OCR helper (macOS) ------------------------------------
+# Compile the native Vision text-recognition helper so chati's OCR uses it
+# (much faster + more accurate than tesseract on real photos, reads HEIC
+# directly). Non-fatal: if swiftc is missing or the build fails, chati falls
+# back to docr/tesseract automatically.
+step "Building the Apple Vision OCR helper"
+if command -v swiftc >/dev/null 2>&1 && [[ -f "$REPO_ROOT/docr/ocr_vision.swift" ]]; then
+    if swiftc -O "$REPO_ROOT/docr/ocr_vision.swift" -o "$REPO_ROOT/docr/ocrvision" 2>/dev/null; then
+        ok "Apple Vision OCR ready (docr/ocrvision) — the default OCR engine on macOS"
+    else
+        warn "Vision helper didn't compile — chati will use docr/tesseract for OCR."
+    fi
+else
+    warn "swiftc not found — skipping Vision helper; chati will use docr/tesseract for OCR."
+fi
+
 # ---- 6. Start Ollama ---------------------------------------------------------
 # A model pull (and chati itself) needs the server up. Start it in the
 # background and wait until the API answers, so nothing downstream fails with
