@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.15.3-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.16.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -16,11 +16,12 @@ An Ollama-centric, high-performance chat interface for the command line, with lo
 > eval "$(/opt/homebrew/bin/brew shellenv)"
 > ```
 
-**1. Get the code** (clones it, or force-updates it to latest if `~/chat` already exists):
+**1. Get the code** (clones it, or force-updates an existing `~/chati` — and moves an old `~/chat` over automatically):
 
 ```bash
-git clone https://github.com/cdamken/chati ~/chat 2>/dev/null || (cd ~/chat && git fetch origin && git reset --hard origin/main)
-cd ~/chat
+[ -d ~/chat/.git ] && [ ! -e ~/chati ] && mv ~/chat ~/chati
+git clone https://github.com/cdamken/chati ~/chati 2>/dev/null || (cd ~/chati && git fetch origin && git reset --hard origin/main)
+cd ~/chati
 ```
 
 **2. Run the installer:**
@@ -100,16 +101,17 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 
 ### 2. Get the code
 
-Clone it — or, **if `~/chat` already exists** (you cloned before), the second half force-updates it to the latest instead of failing with *"destination path already exists"*:
+Clone it — or, **if `~/chati` already exists** (you cloned before), the second half force-updates it to the latest instead of failing with *"destination path already exists"*. The first line **renames an old `~/chat` install to `~/chati`** (the project's original name was `chat`; it's `chati` now) — your `.env` moves with it, and saved sessions live outside the checkout so they're unaffected:
 
 ```bash
-git clone https://github.com/cdamken/chati ~/chat 2>/dev/null || (cd ~/chat && git fetch origin && git reset --hard origin/main)
-cd ~/chat
+[ -d ~/chat/.git ] && [ ! -e ~/chati ] && mv ~/chat ~/chati
+git clone https://github.com/cdamken/chati ~/chati 2>/dev/null || (cd ~/chati && git fetch origin && git reset --hard origin/main)
+cd ~/chati
 ```
 
 > `fetch` + `reset --hard origin/main` is used (rather than a plain `git pull`) because it works even when the local branch has no upstream configured — a plain `pull` fails there with *"no tracking information for the current branch."* It only discards local **code** edits: your config and chats are safe — `.env` and `conversation_histories/` are gitignored, so they're never touched.
 >
-> The folder does **not** have to be `~/chat` — every script resolves paths relative to its own location, so any name/location works. See also [Updating to the latest version](#updating-to-the-latest-version).
+> The folder does **not** have to be `~/chati` — every script resolves paths relative to its own location, so any name/location works. See also [Updating to the latest version](#updating-to-the-latest-version).
 
 ### 3. Run the installer
 
@@ -184,9 +186,14 @@ There are **two independent things** to keep current — don't confuse them:
 **1. chati itself (the code)** — plain `git`:
 
 ```bash
-cd ~/chat
+cd ~/chati
 git pull
 ```
+
+> **Still on the old `~/chat`?** The install folder was renamed `chat` → `chati`. Move it once (your `.env` comes along; sessions live outside the checkout, so they're safe) — or just re-run `./setup.sh` from `~/chat`, which moves itself to `~/chati` and re-points the `chati`/`ailocal` commands:
+> ```bash
+> cd ~ && [ ! -e ~/chati ] && mv chat chati && cd chati
+> ```
 
 Your config and chats are safe: `.env` and `conversation_histories/` are gitignored, so `git pull` never touches them. If a very old checkout refuses to pull cleanly, force it to match the repo (this only discards local *code* edits, not your data):
 
@@ -343,7 +350,7 @@ any of them in `~/.zshrc` if needed.
 
 ### Web search (SearXNG)
 
-SearXNG is an **external service you point at** — it is not bundled, and there is **no default URL baked into the repo** (so a clone never talks to someone else's server). Configure your own instance in `~/chat/.env`:
+SearXNG is an **external service you point at** — it is not bundled, and there is **no default URL baked into the repo** (so a clone never talks to someone else's server). Configure your own instance in `~/chati/.env`:
 
 ```bash
 cp .env.example .env        # then edit .env
@@ -379,9 +386,9 @@ SEARXNG_URLS="http://localhost:8890, https://cloud.example.com/searx"
 ./ai_local/ailocal start searxng          # managed alongside ollama and webui; shows in ailocal status
 ```
 
-Then set `SEARXNG_URLS="http://127.0.0.1:8890, https://<your-cloud>/searx"` in `~/chat/.env`. `ailocal start` (no target) also starts it when installed.
+Then set `SEARXNG_URLS="http://127.0.0.1:8890, https://<your-cloud>/searx"` in `~/chati/.env`. `ailocal start` (no target) also starts it when installed.
 
-`lib_chat.sh` loads `~/chat/.env` automatically (it's gitignored — your endpoint and credentials never enter the repo). With `SEARXNG_URL` empty, `/web` preflights, reports "not configured", and stays off. Run your own SearXNG (cloud or local) per [SEARXNG_SETUP.md](installer/SEARXNG_SETUP.md).
+`lib_chat.sh` loads `~/chati/.env` automatically (it's gitignored — your endpoint and credentials never enter the repo). With `SEARXNG_URL` empty, `/web` preflights, reports "not configured", and stays off. Run your own SearXNG (cloud or local) per [SEARXNG_SETUP.md](installer/SEARXNG_SETUP.md).
 
 ### Decomposition (RAG query splitting)
 | Variable               | Default            | Purpose                                                          |
@@ -405,7 +412,7 @@ near-instant while keeping a big model for the final answer.
 | `MAX_WEB_CHARS`           | `6000`                        | Cap on web-search content fed to the model                    |
 | `MAX_URL_CHARS`           | `15000`                       | Cap on `/url` fetched content                                 |
 | `MAX_COMPRESS_CHARS`      | `10000`                       | Cap on context the compressor reads                           |
-| `WEB_CACHE_DIR`           | `~/chat/.web_cache`           | Parent dir for per-turn `turn.XXXXXX` scratch dirs (wiped after each turn) |
+| `WEB_CACHE_DIR`           | `~/chati/.web_cache`           | Parent dir for per-turn `turn.XXXXXX` scratch dirs (wiped after each turn) |
 
 ### Apple Silicon acceleration
 
@@ -473,7 +480,7 @@ Each instance keeps its own active session, buffer, `/back` pointer and command 
 A bash-only test runner lives at `tests/run_tests.sh`. It exercises three phases:
 
 1. **Syntax + smoke** — `bash -n` every shell script, verify `jq >= 1.6` and `curl` are present, and check that each CLI entry point responds to `--help` / `--version` with exit 0.
-2. **Unit tests** — pure helpers from `lib_chat.sh` (`trim_ws`, `active_model`, `get_voice`, `session_msg_count`, …), `lib_web.sh` (`clean_subqueries`, `format_search_results`) and chati (`normalize_for_decomp`, `extract_exec_cmd`, `agent_capability_prompt`, …) run against a **sandboxed `$BASE_DIR`** under `mktemp -d`. The real `~/chat` state is never touched.
+2. **Unit tests** — pure helpers from `lib_chat.sh` (`trim_ws`, `active_model`, `get_voice`, `session_msg_count`, …), `lib_web.sh` (`clean_subqueries`, `format_search_results`) and chati (`normalize_for_decomp`, `extract_exec_cmd`, `agent_capability_prompt`, …) run against a **sandboxed `$BASE_DIR`** under `mktemp -d`. The real `~/chati` state is never touched.
 3. **Integration** — round-trips through `ollama_chat_oneshot` and `ola` against the real Ollama API. Auto-skipped when Ollama isn't running; the test picks the first installed model (override with `TEST_MODEL=name`).
 
 ```bash

@@ -20,9 +20,11 @@
 set -euo pipefail
 
 # ---- Configuration -----------------------------------------------------------
-# The repo root is wherever THIS script lives — never assume ~/chat.
+# The repo root is wherever THIS script lives — never assume ~/chati.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BREWFILE="$REPO_ROOT/installer/Brewfile"
+# Original args, kept for the chat→chati re-exec below (bash-3.2-safe expand).
+SETUP_ORIG_ARGS=("$@")
 
 # Fallback chat model if memory detection fails. Normally the model is chosen
 # from the Mac's unified memory (recommend_model). Override with --model NAME.
@@ -252,6 +254,32 @@ remove_searxng() {
 if [[ "$REMOVE_ALL"     -eq 1 ]]; then remove_all;     fi
 if [[ "$REMOVE_WEBUI"   -eq 1 ]]; then remove_webui;   fi
 if [[ "$REMOVE_SEARXNG" -eq 1 ]]; then remove_searxng; fi
+
+# ---- Folder rename migration: chat → chati (#10) ----------------------------
+# The project began life as a "chat" app (Pharia) and the docs installed it to
+# ~/chat. It's "chati" now, and the canonical path is ~/chati. On a deployment
+# that still lives in ~/chat, move it to ~/chati automatically so the rename
+# actually happens instead of lingering forever. User data already lives OUTSIDE
+# the checkout (~/.local/share/chati since 1.10), so this only relocates code +
+# .env + local scratch; the PATH symlinks are rebuilt below to point at ~/chati.
+migrate_chat_folder() {
+    local old="$HOME/chat" new="$HOME/chati"
+    # Running FROM the old ~/chat checkout: can't move our own working dir in
+    # place, so move it from $HOME and re-exec setup from the new location.
+    if [[ "$REPO_ROOT" == "$old" && -d "$old/.git" && ! -e "$new" ]]; then
+        step "Renaming install folder: ~/chat → ~/chati (#10)"
+        cd "$HOME" || die "Could not cd to \$HOME to move the folder."
+        mv "$old" "$new" || die "Could not move ~/chat → ~/chati."
+        ok "Moved to ~/chati — re-running setup from there…"
+        cd "$new" || die "Could not enter ~/chati."
+        exec "$new/setup.sh" ${SETUP_ORIG_ARGS[@]+"${SETUP_ORIG_ARGS[@]}"}
+    fi
+    # Old checkout exists but we're already running from ~/chati: it's stale.
+    if [[ -d "$old/.git" && "$REPO_ROOT" != "$old" && "$new" -ef "$REPO_ROOT" ]]; then
+        warn "An old checkout still lives at ~/chat — safe to remove: rm -rf ~/chat"
+    fi
+}
+migrate_chat_folder
 
 echo "🚀 chati setup — repo at: $REPO_ROOT"
 
