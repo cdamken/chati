@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.18.1] - 2026-08-06
+
+### Fixed
+- **Web search no longer mangles proper nouns / brands / domains (#29).** The
+  query decomposer (a small model) rewrote names it "recognized" — e.g. a
+  question about **claude.ai** was searched as **"claudia ai"**. The decomposer
+  prompt now hard-requires copying every proper noun, brand/product name, domain,
+  username and ticker character-for-character (no translate/transliterate/spell-
+  "correct"), and chati now ALWAYS also searches the user's original query
+  verbatim as a safety net, so the real terms are searched even if a subquery
+  drifts.
+
 ## [1.18.0] - 2026-08-06
 
 ### Added
