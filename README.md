@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.17.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.18.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -52,7 +52,7 @@ The point of this project is to show how far a language from 1989 gets when it o
 | `curl` | Every HTTP job: streaming chat with Ollama, one-shot meta calls, authenticated search queries |
 | `lynx` | Webpage → readable text (`/url`) |
 | `say` (macOS) | Text-to-speech with word-by-word color highlighting (`/t`) |
-| `tesseract` + `imagemagick` | The OCR pipeline behind `/ocr` |
+| **Apple Vision** / `pdftotext` / `tesseract` | OCR: native macOS Vision (HEIC/photos, fast) → poppler for digital PDFs → tesseract fallback |
 | `sed` / `awk` / `grep` | Text munging everywhere, including statistical language detection for voice selection |
 | `ollama` | The actual LLM inference |
 
@@ -72,7 +72,7 @@ The chat stack is **pure bash** — the only runtime dependencies are `jq`, `cur
   - `ola`: Streaming chat backend — builds the payload and parses the token stream with inline `jq`.
   - `mola`: Advanced session manager (rename, autorename, delete, etc.).
   - `ola_model`: Model management (pull, switch, list).
-- **`docr/`**: Specialized OCR script with automatic quality profile detection (watermarks, shadows, columns). Uses a Groovy helper for PDF graphics.
+- **OCR**: chati picks the best engine per file — **Apple Vision** on macOS for images (incl. HEIC) and scanned PDFs (native, GPU/Neural-Engine fast, far better than tesseract on real photos; built by `setup.sh` from `docr/ocr_vision.swift`), **`pdftotext`** for digital PDFs (instant, exact), and **`docr/`** (a tesseract wrapper with quality-profile detection + a Groovy PDF helper) as the portable fallback. Force one with `CHATI_OCR_ENGINE=auto|vision|tesseract`.
 - **`lib_chat.sh`**: Shared configuration + core helpers (model selection, session files, voice detection, one-shot Ollama calls).
 - **`lib_web.sh`**: Web research helpers — SearXNG search, URL fetch via lynx, LLM query decomposition. All `curl` + `jq`.
 - **Web search backend**: a self-hosted **SearXNG** metasearch instance — see [SEARXNG_SETUP.md](installer/SEARXNG_SETUP.md) for the full server-side install and maintenance playbook. `/w` and the decomposition-RAG pipeline talk to it instead of scraping DuckDuckGo (which rate-limits aggressively).

@@ -20,3 +20,5 @@ brew "tesseract"
 brew "tesseract-lang"
 brew "imagemagick"
 brew "ghostscript"
+# poppler → pdftotext: instant, lossless text from digital PDFs (skip OCR).
+brew "poppler"
