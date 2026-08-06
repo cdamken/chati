@@ -7,7 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
-## [1.15.2] - 2026-08-05
+## [1.15.3] - 2026-08-06
+
+### Changed
+- **Live progress while OCR runs, so it never looks frozen (#21).** docr can take
+  a minute or more per file (HEIC/photos longer) and ran silently — with no GPU
+  activity (OCR is CPU/tesseract work), it looked like a crash. `ocr_files_to_text`
+  now prints a per-file `[i/N]` header, a live `⏳ working… Ns` elapsed counter
+  that ticks each second, and a `✓ done in Ns` (or a clear warning with docr's
+  last output if nothing was extracted). Up-front note that OCR is CPU-bound so
+  no GPU activity is expected. Used by both `/ocr` and auto-OCR.
 
 ### Changed
 - **Auto-OCR reuses a path you gave earlier in the session (#21).** If you name
