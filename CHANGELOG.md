@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.17.0] - 2026-08-06
+
+### Added
+- **Fine-tuning-ready JSONL session log (#12).** chati now appends one JSONL
+  record per user turn — `{ts, session, model, instruction, context_sent,
+  response}` — to `~/.local/share/chati/finetune/<session>.jsonl`, a clean
+  training/history stream separate from `conversation_histories`. Captured once
+  per turn (before agent sub-steps). Disable with `CHATI_FINETUNE_LOG=0`.
+
+### Changed
+- **`ailocal lan status` / `lan on` now print the raw Tailscale IPv4 too (#20).**
+  MagicDNS names aren't resolvable by every client (Python `urllib`'s
+  `getaddrinfo`, some HTTP libs) even when `curl` resolves them — so scripts and
+  agents reaching a shared Ollama over Tailscale got a name that didn't work.
+  Both commands now show the MagicDNS name **and** the raw `100.x` IP, noting the
+  raw IP is the robust choice for programmatic/cross-machine use.
+- **Agent mode: "act, don't draft" (#13).** `agent_capability_prompt` gains a
+  rule forbidding the model from pasting a file's new contents as prose/markdown/
+  code-fence instead of emitting the command that writes it, with append/create/
+  `sed`-edit worked examples. (The multi-part **decomposition** half of #13 was
+  already covered by the existing "PLAN multi-part work first" rule.)
+
 ## [1.16.0] - 2026-08-06
 
 ### Changed
