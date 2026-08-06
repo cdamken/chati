@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.15.2 - Ollama-Centric Chat Interface
+# Chati v1.15.3 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.15.2"
+CHATI_VERSION="1.15.3"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -686,25 +686,41 @@ ocr_collect_files() {
 # the /ocr command and the automatic detection in the send path (#21).
 ocr_files_to_text() {
     local -a files=("$@")
-    local f base ocr_out nl=$'\n' combined=""
-    (( ${#files[@]} > 1 )) && echo "📄 OCR on ${#files[@]} files in $(dirname "${files[0]}")..." >&2
+    local f base ocr_out nl=$'\n' combined="" i=0 n=${#files[@]} pid start elapsed dlog
+    # OCR is CPU work (tesseract) — no GPU activity is expected; the GPU only
+    # lights up later when the model answers. docr can take ~a minute per file
+    # (HEIC/photos longer), and it runs silently, so a live elapsed counter and
+    # per-file [i/N] progress keep it from looking frozen (a real scare: #21).
+    echo "🔎 OCR on the CPU (tesseract) — no GPU activity is normal; ~1 min/file, HEIC/photos longer." >&2
     for f in "${files[@]}"; do
-        (( ${#files[@]} == 1 )) && echo "📄 OCR on $f..." >&2
-        "$DOCR_CMD" "$f" > /dev/null
+        i=$((i+1))
+        printf '📄 [%d/%d] %s — running docr…\n' "$i" "$n" "$(basename "$f")" >&2
+        dlog=$(mktemp)
+        # Run docr in the background so we can tick a heartbeat while it works.
+        "$DOCR_CMD" "$f" >"$dlog" 2>&1 &
+        pid=$!
+        start=$SECONDS
+        while kill -0 "$pid" 2>/dev/null; do
+            printf '\r   ⏳ working… %ds' "$((SECONDS - start))" >&2
+            sleep 1
+        done
+        wait "$pid"
+        elapsed=$((SECONDS - start))
         # Match by LITERAL prefix, not a find -name glob: a source name
         # with [ ] * ? would be misread as a glob pattern and silently
-        # find nothing (→ "no text" on a file that OCR'd fine). The
-        # quoted "ocr_$base" makes the [[ ]] comparison literal; only the
-        # trailing * is a wildcard.
+        # find nothing (→ "no text" on a file that OCR'd fine).
         base=$(basename "${f%.*}")
         ocr_out=$(find "$(dirname "$f")/OCR_OUTPUTS" -type f -name '*.txt' -newer "$f" 2>/dev/null \
             | while IFS= read -r p; do [[ "$(basename "$p")" == "ocr_$base"* ]] && printf '%s\n' "$p"; done \
             | head -n 1)
         if [[ -n "$ocr_out" ]]; then
+            printf '\r   ✓ [%d/%d] %s — done in %ds%s\n' "$i" "$n" "$(basename "$f")" "$elapsed" "        " >&2
             combined+="${nl}=== $(basename "$f") ===${nl}$(cat "$ocr_out")${nl}"
         else
-            echo "   ⚠️  No text extracted from $(basename "$f")" >&2
+            printf '\r   ⚠️  [%d/%d] %s — no text extracted (%ds)%s\n' "$i" "$n" "$(basename "$f")" "$elapsed" "        " >&2
+            [[ -s "$dlog" ]] && { echo "      docr said:" >&2; tail -n 3 "$dlog" | sed 's/^/      /' >&2; }
         fi
+        rm -f "$dlog"
     done
     printf '%s' "$combined"
 }
