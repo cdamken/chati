@@ -475,6 +475,20 @@ test_clean_subqueries_caps_at_max() {
 }
 run_test "clean_subqueries caps output at max lines" test_clean_subqueries_caps_at_max
 
+# --- decompose_query always searches the original query verbatim (#29) ---
+test_decompose_keeps_original_query() {
+    # The decomposer (a small model) sometimes mangles a proper noun/domain
+    # ("claude.ai" → "claudia ai"). The original query must still be searched.
+    ollama_chat_oneshot() { printf 'claudia ai error\nconexion claudia ai problema\n'; }
+    decompose_model() { echo "stub-model"; }
+    local r; r=$(decompose_query "no me conecto a claude.ai")
+    printf '%s\n' "$r" | grep -qi 'claude\.ai' \
+        || { echo "original query with claude.ai was dropped" >&2; return 1; }
+    [[ "$(printf '%s\n' "$r" | head -n1)" == "no me conecto a claude.ai" ]] \
+        || { echo "original query should be searched first" >&2; return 1; }
+}
+run_test "decompose_query always searches the original query (#29)" test_decompose_keeps_original_query
+
 # --- format_search_results (SearXNG JSON → LLM text block) ---
 test_format_results_fixture() {
     local out

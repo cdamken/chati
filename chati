@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.18.0 - Ollama-Centric Chat Interface
+# Chati v1.18.1 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.18.0"
+CHATI_VERSION="1.18.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 

@@ -437,7 +437,8 @@ STRICT RULES:
 2. 3 to 8 keywords each. NO question marks. NO full sentences. Think like someone typing into a search box.
 3. If the request centers on one clear subject (a company, a person, a ticker), include that subject in every query — verbatim, do not drop or abbreviate it (e.g. \"3M\", not \"M\").
 4. Each query targets a DIFFERENT data point or a different one of the resolved items.
-5. Respond with ONLY the queries, one per line, no numbering, no bullets, no commentary.
+5. PRESERVE NAMES EXACTLY. Copy every proper noun, brand/product name, domain, username, ticker or technical term character-for-character — NEVER translate, transliterate, spell-\"correct\", or localize them (e.g. keep \"claude.ai\" as \"claude.ai\", never \"claudia\"; keep \"PostgreSQL\", never \"Postgres SQL\").
+6. Respond with ONLY the queries, one per line, no numbering, no bullets, no commentary.
 
 Example — context says the conversation is about Kenya, Uganda and Burundi, and the request is \"current presidents of those countries\":
 Kenya current president 2026
@@ -446,7 +447,7 @@ Burundi current president 2026
 
 User request: $query"
     else
-        prompt="Break the following user question into up to $max_subs short web search queries (3-8 keywords each, NO question marks, NO full sentences — think search box, not chatbot). Respond with ONLY the queries, one per line. No numbering, no bullets, no commentary. If the question is already a single concise lookup, return just the original.
+        prompt="Break the following user question into up to $max_subs short web search queries (3-8 keywords each, NO question marks, NO full sentences — think search box, not chatbot). PRESERVE NAMES EXACTLY: copy every proper noun, brand/product name, domain, username or ticker character-for-character — never translate, transliterate or spell-\"correct\" them (e.g. keep \"claude.ai\" as \"claude.ai\", never \"claudia\"). Respond with ONLY the queries, one per line. No numbering, no bullets, no commentary. If the question is already a single concise lookup, return just the original.
 
 Question: $query"
     fi
@@ -458,9 +459,14 @@ Question: $query"
     fi
     local subs
     subs=$(printf '%s\n' "$content" | clean_subqueries "$max_subs")
-    if [[ -z "$subs" ]]; then
+    # Always search the user's ORIGINAL query verbatim too, as a safety net: the
+    # decomposer (a small model) sometimes mangles a proper noun / brand / domain
+    # — e.g. \"claude.ai\" → \"claudia ai\" (#29). Prepend the original and dedup
+    # (case-insensitively) so the real terms are searched even if a subquery
+    # drifted. Capped to \$max_subs.
+    {
         printf '%s\n' "$query"
-    else
-        printf '%s\n' "$subs"
-    fi
+        [[ -n "$subs" ]] && printf '%s\n' "$subs"
+    } | awk '{ key=tolower($0); sub(/^[ \t]+/,"",key); sub(/[ \t]+$/,"",key) } NF && !seen[key]++' \
+      | head -n "$max_subs"
 }
