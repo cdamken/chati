@@ -776,13 +776,18 @@ PLIST
 # re-applies it). Ollama has NO authentication — only expose on a trusted LAN.
 # Stable Tailscale address for this machine (MagicDNS name if available — it
 # survives IP changes — otherwise the 100.x IP). Empty if Tailscale isn't up.
-tailscale_host() {
-    command -v tailscale >/dev/null 2>&1 || return 1
-    local name=""
-    if command -v jq >/dev/null 2>&1; then
-        name=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//')
-    fi
-    [[ -n "$name" ]] && { printf '%s\n' "$name"; return 0; }
+# Tailscale MagicDNS name only (empty if unavailable). Stable across IP
+# changes, but not every client's resolver knows it (Python urllib's
+# getaddrinfo, some HTTP libs) — hence tailscale_ip4 below (#20).
+tailscale_dnsname() {
+    command -v tailscale >/dev/null 2>&1 || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//'
+}
+# Raw Tailscale IPv4 — resolves everywhere getaddrinfo works, so it's the
+# robust choice for scripts/agents/other runtimes that can't resolve MagicDNS.
+tailscale_ip4() {
+    command -v tailscale >/dev/null 2>&1 || return 0
     tailscale ip -4 2>/dev/null | head -1
 }
 
@@ -796,8 +801,9 @@ lan_cmd() {
             restart_target ollama >/dev/null 2>&1
             ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
             echo "🌐 Ollama LAN exposure: ON — reachable at http://${ip:-<this-mac-ip>}:11434"
-            ts=$(tailscale_host) && [[ -n "$ts" ]] && \
-                echo "   🔒 Via Tailscale (stable, recommended): http://$ts:11434"
+            local tsn tsi; tsn=$(tailscale_dnsname); tsi=$(tailscale_ip4)
+            [[ -n "$tsn" ]] && echo "   🔒 Tailscale (MagicDNS): http://$tsn:11434  (stable across IP changes)"
+            [[ -n "$tsi" ]] && echo "   🔒 Tailscale (raw IP):   http://$tsi:11434  (use from scripts/clients that can't resolve MagicDNS, e.g. Python urllib)"
             echo "   ⚠️  Ollama has no authentication — expose only on a trusted network,"
             echo "       or reach it over Tailscale (private, encrypted, your devices only)."
             ;;
@@ -814,9 +820,10 @@ lan_cmd() {
             bind=$(lsof -nP -iTCP:11434 -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print $9; exit}')
             echo "  currently listening on: ${bind:-not running}"
             ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
-            [[ -n "$ip" ]] && echo "  LAN address:       http://$ip:11434"
-            ts=$(tailscale_host) && [[ -n "$ts" ]] && \
-                echo "  Tailscale address: http://$ts:11434  (stable — use this)"
+            [[ -n "$ip" ]] && echo "  LAN address:          http://$ip:11434"
+            local tsn tsi; tsn=$(tailscale_dnsname); tsi=$(tailscale_ip4)
+            [[ -n "$tsn" ]] && echo "  Tailscale (MagicDNS): http://$tsn:11434  (stable across IP changes)"
+            [[ -n "$tsi" ]] && echo "  Tailscale (raw IP):   http://$tsi:11434  (use from scripts/clients that can't resolve MagicDNS, e.g. Python urllib)"
             ;;
         *) echo "Usage: ailocal lan on|off|status"; return 1 ;;
     esac
