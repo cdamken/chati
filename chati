@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.22.0 - Ollama-Centric Chat Interface
+# Chati v1.22.1 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.22.0"
+CHATI_VERSION="1.22.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -1360,9 +1360,9 @@ while true; do
                         o_mark=""; [[ "$o_url" == "$OLLAMA_API" ]] && o_mark="  ← current"
                         printf '   %d. %s  (v%s)%s\n' "$ollama_idx" "$o_url" "$o_ver" "$o_mark"
                     done < <(discover_ollama_endpoints)
-                    [[ "$ollama_idx" -eq 0 ]] && echo "   (none found — is Ollama running, and Tailscale up?)"
+                    [[ "$ollama_idx" -eq 0 ]] && echo "   (none found via localhost/Tailscale — you can still point at any LAN IP by hand)"
                     echo "   Current: $OLLAMA_API"
-                    echo "   Switch:  /ollama <number|host|url|local>"
+                    echo "   Switch:  /ollama <number|host|url|local>   (e.g. /ollama 192.168.1.50:11434)"
                 else
                     if [[ "$cmd_args" == local ]]; then
                         o_new="http://localhost:11434"

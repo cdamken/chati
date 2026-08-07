@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.22.1] - 2026-08-07
+
+### Docs
+- **Clarified that the remote-Ollama endpoint is not Tailscale-only.** `/host`,
+  `/ollama <addr>` and `OLLAMA_HOST` accept ANY reachable address (a LAN IP like
+  `192.168.1.50:11434`, a hostname, or a Tailscale name). Only `/ollama`'s
+  auto-discovery is Tailscale-based (it scans localhost + Tailscale peers); you
+  can always point at a plain LAN IP by hand. Updated `.env.example`, the README
+  note, and the `/ollama` empty-list hint.
+
 ## [1.22.0] - 2026-08-07
 
 ### Added
