@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.22.0] - 2026-08-07
+
+### Added
+- **`/host` — set and persist the default Ollama endpoint from inside chati.**
+  Follow-up to #39: `/ollama` switches for the current session only; `/host
+  <host|url|local>` writes `OLLAMA_HOST` to your `.env` so it survives restarts
+  (and applies immediately). `/host` alone shows the current + saved endpoint;
+  `/host local` resets to localhost and removes it from `.env`. Rewrites `.env`
+  in place (keeps comments and other vars, no duplicate lines, `600` perms). No
+  more hand-editing `.env` to point at a remote Ollama.
+
 ## [1.21.0] - 2026-08-07
 
 ### Added
