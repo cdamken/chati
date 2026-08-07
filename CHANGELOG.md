@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.25.1] - 2026-08-07
+
+### Changed
+- **Friendlier first-launch message per terminal.** A brand-new terminal (its
+  own tty, no session yet) used to greet you with a scary `⚠️ Current session
+  missing. Starting a new one...` — it isn't missing, it's just your first one.
+  Now it says `✨ Starting a new session…`. The `⚠️` warning is kept only for the
+  real case: an active session whose file was actually deleted/moved. `/settings`
+  also shows `(new — none yet)` instead of the literal `active` before the first
+  session exists.
+
 ## [1.25.0] - 2026-08-07
 
 ### Changed
