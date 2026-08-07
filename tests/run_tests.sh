@@ -712,6 +712,18 @@ test_router_defaults_to_search() {
 }
 run_test "web_query_needs_search defaults to SEARCH on failure" test_router_defaults_to_search
 
+test_router_parses_and_takes_agent_arg() {
+    # Plumbing (semantics are the model's job, tested live): the router accepts
+    # the agent-mode 2nd arg (#33) and parses the model's reply either way.
+    ollama_chat_oneshot() { echo "DIRECT"; }
+    local r; r=$(web_query_needs_search "organiza mi carpeta" "ON")
+    assert_eq "$r" "DIRECT" "explicit DIRECT reply honoured, agent arg accepted" || return 1
+    ollama_chat_oneshot() { echo "SEARCH please"; }
+    r=$(web_query_needs_search "precio de apple hoy" "OFF")
+    assert_eq "$r" "SEARCH" "anything not-DIRECT -> SEARCH"
+}
+run_test "web_query_needs_search parses reply and takes the agent arg (#33)" test_router_parses_and_takes_agent_arg
+
 # --- ollama_running probe ---
 test_ollama_running_returns_boolean() {
     if ollama_running; then
