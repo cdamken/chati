@@ -56,6 +56,20 @@ export CHATI_INSTANCE="${CHATI_INSTANCE:-}"
 export CHATI_DATA_HOME="${CHATI_DATA_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/chati}"
 mkdir -p "$CHATI_DATA_HOME" 2>/dev/null
 
+# Per-terminal isolation (#37): with no explicit CHATI_INSTANCE, derive one from
+# the controlling terminal, so each window/pane keeps its OWN active session,
+# live buffer and model — two terminals no longer clobber each other. The tty
+# name is stable, so the SAME terminal resumes its state across relaunches; a
+# different terminal is independent. Falls back to the shared instance when
+# there is no tty (pipes, scripts, the test harness), so non-interactive use and
+# tests are unchanged. Set CHATI_INSTANCE explicitly to name it yourself.
+if [[ -z "$CHATI_INSTANCE" ]]; then
+    _tty=$(tty 2>/dev/null)
+    [[ "$_tty" == /dev/* ]] && CHATI_INSTANCE="tty-$(printf '%s' "${_tty#/dev/}" | tr -c 'A-Za-z0-9_-' '_')"
+    unset _tty
+fi
+export CHATI_INSTANCE
+
 if [[ -n "$CHATI_INSTANCE" ]]; then
     _chati_inst=$(printf '%s' "$CHATI_INSTANCE" | tr -c 'A-Za-z0-9_-' '_')
     export STATE_DIR="$CHATI_DATA_HOME/instances/$_chati_inst"
@@ -64,7 +78,12 @@ else
 fi
 mkdir -p "$STATE_DIR" 2>/dev/null
 
-export ACTIVE_MODEL_FILE="${ACTIVE_MODEL_FILE:-$CHATI_DATA_HOME/.active_ollama_model.txt}"
+# Model choice is per-instance (per terminal) so /model in one window doesn't
+# change another; a terminal with no choice yet falls back to the GLOBAL default
+# below (your usual model), then to DEFAULT_MODEL. When there's no instance
+# (shared), both paths are the same file — identical to the old behavior.
+export GLOBAL_MODEL_FILE="${GLOBAL_MODEL_FILE:-$CHATI_DATA_HOME/.active_ollama_model.txt}"
+export ACTIVE_MODEL_FILE="${ACTIVE_MODEL_FILE:-$STATE_DIR/.active_ollama_model.txt}"
 export MESSAGES_FILE="${MESSAGES_FILE:-$STATE_DIR/.messages.active.ola.txt}"
 export ACTIVE_FILE="${ACTIVE_FILE:-$MESSAGES_FILE}"
 export HISTORY_DIR="${HISTORY_DIR:-$CHATI_DATA_HOME/conversation_histories}"
@@ -516,13 +535,16 @@ ollama_running() {
 #   3. Nothing installed / ollama down: return the configured default name
 #      so any resulting error at least names a model.
 active_model() {
+    local m
     if [[ -s "$ACTIVE_MODEL_FILE" ]]; then
-        local m
         m=$(cat "$ACTIVE_MODEL_FILE" 2>/dev/null)
-        if [[ -n "$m" ]]; then
-            printf '%s\n' "$m"
-            return 0
-        fi
+        [[ -n "$m" ]] && { printf '%s\n' "$m"; return 0; }
+    fi
+    # Per-terminal file empty → fall back to the GLOBAL model choice (#37), so a
+    # fresh terminal starts on your usual model. (Same file when not per-instance.)
+    if [[ -s "$GLOBAL_MODEL_FILE" && "$GLOBAL_MODEL_FILE" != "$ACTIVE_MODEL_FILE" ]]; then
+        m=$(cat "$GLOBAL_MODEL_FILE" 2>/dev/null)
+        [[ -n "$m" ]] && { printf '%s\n' "$m"; return 0; }
     fi
     local installed
     installed=$(ollama list 2>/dev/null | tail -n +2 | awk 'NF{print $1}')
