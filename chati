@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.25.1 - Ollama-Centric Chat Interface
+# Chati v1.25.2 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.25.1"
+CHATI_VERSION="1.25.2"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -1023,14 +1023,13 @@ Mode Toggles:
                         processes, network or system shows a warning and
                         asks "Execute? (y/N)" — denied unless you type y.
                         Set CHATI_AGENT_CONFIRM=all to confirm every
-                        command. Off by default. (Aliases: /agent, /a.)
+                        command. Off by default.
 /sY                     Toggle AUTO-ACCEPT (capital Y, on purpose so it
                         can't happen by accident): runs EVERY proposed
                         command WITHOUT asking — including destructive ones.
                         Shows a warning; only for a task you're watching.
                         /sY again — or /s — returns to verification. There
                         is no Shell Mode without safety unless you type /sY.
-                        (Alias: /aY.)
 
 Configuration:
 --------------
@@ -1335,7 +1334,11 @@ while true; do
                     echo "❌ Provide URL."
                 fi
                 ;;
-            /shell|/s|/agent|/a)   # /agent, /a kept as backward-compat aliases
+            /agent|/a|/aY)
+                # Retired names (#47): renamed to Shell. Do NOT act — especially
+                # /aY, which used to arm auto-accept; just point to the new name.
+                echo "ℹ️  '$cmd_name' was renamed. Use /shell (/s) to toggle Shell Mode, /sY for auto-accept." ;;
+            /shell|/s)
                 # Shell Mode: the model proposes shell commands you approve. /s
                 # never enables auto-accept. From auto-accept it de-escalates to
                 # verification; otherwise it toggles ON(verification)/OFF.
@@ -1350,7 +1353,7 @@ while true; do
                     echo "🛡️  Shell: ON (verification) — the AI proposes commands; read-only ones run directly,"
                     echo "    anything that could change files/processes/network/system asks 'Execute? (y/N)'."
                 fi ;;
-            /sY|/aY)   # capital Y on purpose — a deliberate, can't-happen-by-accident switch (/aY = alias)
+            /sY)   # capital Y on purpose — a deliberate, can't-happen-by-accident switch
                 if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
                     AGENT_AUTOACCEPT="OFF"   # AGENT_MODE stays ON → back to verification
                     echo "🛡️  Shell: ON (verification) — auto-accept OFF; risky commands ask again."

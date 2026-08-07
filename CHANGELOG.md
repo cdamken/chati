@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.25.2] - 2026-08-07
+
+### Changed
+- **Retired the old Shell-mode names `/agent`, `/a`, `/aY` (#47).** After the
+  1.19.0 rename to Shell, they were kept as aliases; now they no longer do
+  anything except point you to the new command. This matters most for `/aY`: a
+  reflex keystroke can no longer arm auto-accept — it just prints
+  `ℹ️ '/aY' was renamed. Use /shell (/s)… /sY for auto-accept.` The working
+  commands are `/shell` (`/s`) and `/sY`.
+
 ## [1.25.1] - 2026-08-07
 
 ### Changed
