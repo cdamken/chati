@@ -23,7 +23,7 @@ list_session_files() {
     for f in "$HISTORY_DIR"/*; do
         [[ -f "$f" ]] || continue
         case "$f" in
-            *_summary|*_prompt|*_compressed_at|*.lock) continue ;;
+            *_summary|*_prompt|*_compressed_at|*_settings|*.lock) continue ;;
         esac
         files+=("$f")
     done

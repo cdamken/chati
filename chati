@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.23.0 - Ollama-Centric Chat Interface
+# Chati v1.24.0 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.23.0"
+CHATI_VERSION="1.24.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -67,7 +67,7 @@ history -c
 history -r "$HISTFILE"
 set +o history
 # Flush history once at exit instead of after every keystroke.
-trap 'history -w "$HISTFILE" 2>/dev/null' EXIT
+trap 'chati_on_exit' EXIT   # flush history + persist this session's settings (#37)
 
 # --- STATE ---
 LAST_RESPONSE=""
@@ -110,6 +110,53 @@ AI_COLOR=$(ansi_color "$AI_COLOR_NAME")
 
 update_say_rate() {
     SAY_RATE=$(awk -v s="$SAY_SPEED" 'BEGIN { r=s*200; if(r<50)r=50; if(r>600)r=600; print int(r) }')
+}
+
+# --- Per-session settings (#37) ---
+# The runtime toggles below travel WITH the session: saved when you leave/switch,
+# restored when you return, so each conversation keeps its own config. A NEW
+# session inherits the editable global DEFAULTS (see /defaults). Model + prompt
+# are handled separately (prompt already per-session; model default is global).
+CHATI_SETTINGS_KEYS=(FORCE_LANG WEB_MODE THINK_MODE AGENT_MODE AGENT_AUTOACCEPT \
+                     VOICE_MODE DEFAULT_VOICE SAY_SPEED SAY_COLORS \
+                     USER_COLOR_NAME AI_COLOR_NAME)
+DEFAULTS_SETTINGS_FILE="${DEFAULTS_SETTINGS_FILE:-$CHATI_DATA_HOME/defaults_settings}"
+
+# Write the current toggles to a settings file (one KEY=value per line).
+settings_write() {
+    local f="$1" k; [[ -z "$f" ]] && return 0
+    mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+    : > "$f" 2>/dev/null || return 0
+    for k in "${CHATI_SETTINGS_KEYS[@]}"; do printf '%s=%s\n' "$k" "${!k}" >> "$f"; done
+}
+# Read a settings file into the runtime toggles (known keys only), then refresh
+# the derived state (colors, speech rate). Returns 1 if the file is absent.
+settings_read() {
+    local f="$1" k v
+    [[ -f "$f" ]] || return 1
+    while IFS='=' read -r k v; do
+        case " ${CHATI_SETTINGS_KEYS[*]} " in *" $k "*) printf -v "$k" '%s' "$v" ;; esac
+    done < "$f"
+    USER_COLOR=$(ansi_color "$USER_COLOR_NAME"); AI_COLOR=$(ansi_color "$AI_COLOR_NAME")
+    update_say_rate
+    return 0
+}
+# Save the ACTIVE session's toggles (call before switching away / at exit).
+persist_session_settings() {
+    local s; s=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    [[ -n "$s" ]] && settings_write "$HISTORY_DIR/${s}_settings"
+}
+# Load the ACTIVE session's toggles; if it has none yet, fall back to the global
+# defaults (so a brand-new session inherits them). Silent if neither exists.
+load_active_settings() {
+    local s; s=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    [[ -n "$s" ]] && settings_read "$HISTORY_DIR/${s}_settings" && return 0
+    settings_read "$DEFAULTS_SETTINGS_FILE" 2>/dev/null || true
+}
+# Clean-exit handler: flush command history AND the current session's settings.
+chati_on_exit() {
+    history -w "$HISTFILE" 2>/dev/null
+    persist_session_settings 2>/dev/null
 }
 
 # Trigger background memory compression after every COMPRESS_EVERY messages.
@@ -927,6 +974,9 @@ Core:
 /help      (/h, /?)     Show this help menu.
 /quit      (/q)         Exit chat loop (also /bye, /exit).
 /settings               Show current chat settings.
+/defaults [save|clear]  Show / save / clear the global defaults that NEW
+                        sessions inherit. (Each session's settings are saved
+                        and restored automatically.)
 
 Session Management:
 -------------------
@@ -1090,6 +1140,10 @@ migrate_legacy_state
 
 ensure_valid_model
 
+# Restore this session's saved toggles (or the global defaults for a fresh one)
+# before showing settings, so /settings reflects the persisted config (#37).
+load_active_settings
+
 show_settings
 echo "Type /h for help | /bye to exit."
 
@@ -1150,6 +1204,23 @@ while true; do
                 exit 0 ;;
             /h|/help|/\?) show_help ;;
             /settings)   show_settings ;;
+            /defaults)
+                # The editable global defaults a NEW session inherits (#37).
+                if [[ "$cmd_args" == save ]]; then
+                    settings_write "$DEFAULTS_SETTINGS_FILE"
+                    echo "💾 Saved current settings as the default for NEW sessions."
+                elif [[ "$cmd_args" == clear || "$cmd_args" == reset ]]; then
+                    rm -f "$DEFAULTS_SETTINGS_FILE"
+                    echo "🧹 Cleared the global defaults (new sessions start from built-in defaults)."
+                else
+                    if [[ -f "$DEFAULTS_SETTINGS_FILE" ]]; then
+                        echo "🌐 Global defaults for new sessions:"
+                        sed 's/^/   /' "$DEFAULTS_SETTINGS_FILE"
+                    else
+                        echo "🌐 No global defaults set — new sessions use built-in defaults."
+                    fi
+                    echo "   /defaults save   (make the current settings the default)   ·   /defaults clear"
+                fi ;;
             /persona|/prompt)
                 prompt_file=$(current_session_prompt_file)
                 if [[ -z "$cmd_args" ]]; then
@@ -1174,9 +1245,9 @@ while true; do
                 fi
                 ;;
             /sessions)   "$MOLA_CMD" list ;;
-            /new)        "$MOLA_CMD" new "$cmd_args" ;;
-            /switch)     "$MOLA_CMD" switch "$cmd_args" ;;
-            /back)       "$MOLA_CMD" back ;;
+            /new)        persist_session_settings; "$MOLA_CMD" new "$cmd_args"; load_active_settings ;;
+            /switch)     persist_session_settings; "$MOLA_CMD" switch "$cmd_args"; load_active_settings ;;
+            /back)       persist_session_settings; "$MOLA_CMD" back; load_active_settings ;;
             # $cmd_args is left unquoted on purpose so "3 new_name" splits
             # into two args — but disable globbing first (set -f) so a
             # name like "*" isn't expanded against the cwd, then restore.
