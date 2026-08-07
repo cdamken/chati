@@ -131,6 +131,20 @@ tail -n "${SLIDING_WINDOW:-20}" "$MESSAGES_FILE" 2>/dev/null | jq -R -s \
 # the first token arrives.
 printf "🤔 " >&2
 
+# Warm the model first (#50). A cold-load of a big model (gemma4:31b ~19 GB)
+# can spend minutes emitting ZERO bytes while it loads — which the stream's
+# stall guard below (--speed-time) would wrongly kill as "Operation too slow".
+# This preload just loads the model into memory: POST /api/generate with only
+# the model name returns as soon as it's resident (done_reason "load"). It gets
+# a generous timeout and NO stall guard, so cold-load time never counts against
+# the stream. When the model is already loaded it returns instantly, so a warm
+# turn pays almost nothing. Best-effort — on failure we still try to stream.
+curl -s --max-time "${OLA_LOAD_TIMEOUT:-900}" \
+    -X POST "$OLLAMA_API/api/generate" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -nc --arg m "$OLLAMA_MODEL" '{model:$m}')" \
+    >/dev/null 2>&1 || true
+
 # Stream pipeline, all standard tools:
 #   curl   — POSTs and emits Ollama's NDJSON chunks as they arrive
 #   jq -j  — unbuffered: prints each chunk's .message.content with no

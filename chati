@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.25.3"
+CHATI_VERSION="1.25.4"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
