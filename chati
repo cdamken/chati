@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.21.0 - Ollama-Centric Chat Interface
+# Chati v1.22.0 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.21.0"
+CHATI_VERSION="1.22.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -990,8 +990,11 @@ Configuration:
 /persona ""             Clear the persona.
 /model [idx|name]       List or switch Ollama model.
 /ollama [n|host|local]  List reachable Ollama servers (localhost + Tailscale)
-                        and switch to one. Each server has its own models.
-                        Set a default in .env with OLLAMA_HOST.
+                        and switch to one for THIS session. Each server has
+                        its own models.
+/host [host|url|local]  Set the DEFAULT Ollama endpoint and save it to .env
+                        (persists across restarts). /host alone shows current
+                        + saved. /host local resets to localhost.
 /lang [code]            List or set response language (auto, en, es, …).
 /voice [name]           List or set TTS voice (Samantha, Anna, Paulina, …).
 /speed [mult]           Set speech speed multiplier (0.25 – 3.0).
@@ -1361,12 +1364,15 @@ while true; do
                     echo "   Current: $OLLAMA_API"
                     echo "   Switch:  /ollama <number|host|url|local>"
                 else
-                    case "$cmd_args" in
-                        local)          o_new="http://localhost:11434" ;;
-                        [0-9]*)         o_new=$(discover_ollama_endpoints | sed -n "${cmd_args}p" | cut -f1) ;;
-                        http://*|https://*) o_new="$cmd_args" ;;
-                        *)              o_new="http://$cmd_args"; [[ "$cmd_args" != *:* ]] && o_new="http://$cmd_args:11434" ;;
-                    esac
+                    if [[ "$cmd_args" == local ]]; then
+                        o_new="http://localhost:11434"
+                    elif [[ "$cmd_args" == [0-9]* ]]; then
+                        o_new=$(discover_ollama_endpoints | sed -n "${cmd_args}p" | cut -f1)
+                    elif [[ "$cmd_args" == http://* || "$cmd_args" == https://* ]]; then
+                        o_new="$cmd_args"
+                    else
+                        o_new="http://$cmd_args"; [[ "$cmd_args" != *:* ]] && o_new="http://$cmd_args:11434"
+                    fi
                     if [[ -z "$o_new" ]]; then
                         echo "❌ No endpoint #$cmd_args in the list — run /ollama to see them."
                     elif curl -fsS --max-time 3 "$o_new/api/version" >/dev/null 2>&1; then
@@ -1377,6 +1383,47 @@ while true; do
                         echo "   Its models differ from other endpoints — run /model to pick one available here."
                     else
                         echo "❌ Can't reach $o_new (is that Ollama up and exposed?)."
+                    fi
+                fi ;;
+            /host)
+                # Set the DEFAULT Ollama endpoint and PERSIST it to .env, so it
+                # survives restarts (unlike /ollama, which switches only for this
+                # session). /host with no args shows the current + saved default.
+                if [[ -z "$cmd_args" ]]; then
+                    echo "🛰️  Ollama endpoint (now): $OLLAMA_API"
+                    h_saved=$(grep -E '^[[:space:]]*(export[[:space:]]+)?OLLAMA_HOST=' "$CHAT_ENV" 2>/dev/null \
+                              | tail -1 | sed -E 's/^[^=]*=//; s/^"//; s/"$//')
+                    [[ -n "$h_saved" ]] && echo "   saved default (.env): $h_saved" \
+                                        || echo "   no saved default (localhost unless overridden)"
+                    echo "   Save a default:  /host <host|url|local>      Browse live:  /ollama"
+                else
+                    if [[ "$cmd_args" == local || "$cmd_args" == off || "$cmd_args" == localhost ]]; then
+                        h_target=""
+                    elif [[ "$cmd_args" == http://* || "$cmd_args" == https://* ]]; then
+                        h_target="${cmd_args#http*://}"
+                    else
+                        h_target="$cmd_args"; [[ "$h_target" != *:* ]] && h_target="$h_target:11434"
+                    fi
+                    # Rewrite .env: drop any existing OLLAMA_HOST line, keep the
+                    # rest, add the new one (unless clearing back to localhost).
+                    h_tmp=$(mktemp)
+                    if [[ -f "$CHAT_ENV" ]]; then
+                        grep -vE '^[[:space:]]*(export[[:space:]]+)?OLLAMA_HOST=' "$CHAT_ENV" > "$h_tmp" 2>/dev/null || : > "$h_tmp"
+                    else : > "$h_tmp"; fi
+                    [[ -n "$h_target" ]] && printf 'export OLLAMA_HOST="%s"\n' "$h_target" >> "$h_tmp"
+                    ( umask 077; mv "$h_tmp" "$CHAT_ENV" )
+                    if [[ -z "$h_target" ]]; then
+                        export OLLAMA_HOST="localhost:11434"; export OLLAMA_API="http://localhost:11434"
+                        echo "🏠 Endpoint reset to localhost and removed from .env."
+                    else
+                        export OLLAMA_HOST="$h_target"; export OLLAMA_API="http://$h_target"
+                        if curl -fsS --max-time 3 "$OLLAMA_API/api/version" >/dev/null 2>&1; then
+                            echo "✅ Saved default Ollama → $OLLAMA_API (in .env; active now and on next launch)."
+                            echo "   Its models differ — run /model to pick one available here."
+                        else
+                            echo "💾 Saved default Ollama → $OLLAMA_API (in .env), but can't reach it right now."
+                            echo "   It'll be used once it's up (wake the machine, or 'ailocal awake on' there)."
+                        fi
                     fi
                 fi ;;
             /lang)

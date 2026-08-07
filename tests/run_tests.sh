@@ -250,7 +250,9 @@ test_chati_dispatch_has_long_forms() {
         && assert_match "$dispatch" "/batch\|/b\)" "/batch|/b arm" \
         && assert_match "$dispatch" "/talk\|/t\)" "/talk|/t arm" \
         && assert_match "$dispatch" "/web\|/w\)" "/web|/w arm" \
-        && assert_match "$dispatch" "/shell\|/s" "/shell|/s arm"
+        && assert_match "$dispatch" "/shell\|/s" "/shell|/s arm" \
+        && assert_match "$dispatch" "/ollama\|/endpoint\)" "/ollama arm" \
+        && assert_match "$dispatch" "/host\)" "/host arm"
 }
 run_test "chati dispatcher accepts long and short forms" test_chati_dispatch_has_long_forms
 

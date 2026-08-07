@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.21.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.22.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -168,7 +168,7 @@ chati
 >
 > Force a specific model with `./setup.sh --model NAME` (e.g. `llama3.3:70b` on a high-RAM Mac). If the configured model isn't installed (e.g. after switching machines), chati **auto-falls-back** to an installed model instead of failing every message — pick any model anytime with `/model`. For a faster `/web` triage router, also pull a small model: `ollama pull llama3.2:3b`.
 >
-> **Using a remote Ollama.** On a weak laptop you can offload to a beefier machine's Ollama (e.g. over Tailscale): set `OLLAMA_HOST="host:11434"` in `.env` (chati points both chat and `/model` there), or switch live with **`/ollama`** — it discovers reachable servers (localhost + Tailscale peers) and lets you pick one. Each server has its own installed models.
+> **Using a remote Ollama.** On a weak laptop you can offload to a beefier machine's Ollama (e.g. over Tailscale): set `OLLAMA_HOST="host:11434"` in `.env` (chati points both chat and `/model` there), save a persistent default from inside chati with **`/host`**, or switch just for this session with **`/ollama`** — it discovers reachable servers (localhost + Tailscale peers) and lets you pick one. Each server has its own installed models.
 
 ### 5. OpenWebUI — browser UI on top of Ollama
 
