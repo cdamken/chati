@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.21.0] - 2026-08-07
+
+### Added
+- **Use an external / remote Ollama, with discovery (#39).** Point chati at a
+  more powerful machine's Ollama for BOTH chat and model ops. Set `OLLAMA_HOST`
+  in `.env` (the same var the `ollama` CLI reads; chati derives its API URL from
+  it via `resolve_ollama_api`, so `/model`, list and pull hit the same box), or
+  switch live with the new **`/ollama`** command: it discovers reachable servers
+  (localhost + online Tailscale peers on :11434), lists them with versions, and
+  switches to the one you pick (`/ollama <n|host|url|local>`). Each server has
+  its own models, so `/settings` shows the endpoint next to the model when it's
+  remote. A `0.0.0.0` bind is treated as localhost for the client.
+
 ## [1.20.0] - 2026-08-07
 
 ### Changed
