@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.18.3-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.19.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -44,7 +44,7 @@ cd ~/chati
 
 ## Philosophy: bash as the conductor
 
-The point of this project is to show how far a language from 1989 gets when it orchestrates the right specialized tools. **~4,400 lines of bash** drive the whole experience — streaming LLM chat, RAG web research, session memory with LLM compression, TTS, OCR, an agent mode with supervised shell execution — and every hard sub-problem is delegated to a battle-tested Unix tool that does one thing well:
+The point of this project is to show how far a language from 1989 gets when it orchestrates the right specialized tools. **~4,400 lines of bash** drive the whole experience — streaming LLM chat, RAG web research, session memory with LLM compression, TTS, OCR, a Shell Mode with supervised command execution — and every hard sub-problem is delegated to a battle-tested Unix tool that does one thing well:
 
 | Tool | What bash delegates to it |
 |---|---|
@@ -453,11 +453,11 @@ Each instance keeps its own active session, buffer, `/back` pointer and command 
 ### Mode Toggles
 - `/talk` (`/t`): Toggle auto-speech.
 - `/web` (`/w`): Toggle web research. **Honest about availability**: turning it on first preflights the (external) SearXNG backend — if you're offline, the server is down, or credentials are wrong, it says so plainly and stays OFF instead of pretending. **Smart when on**: a router decides per message whether the question actually needs live data. A joke, a coding question or an explanation is answered directly (no search); prices, news, "latest" or recent data trigger a SearXNG search + RAG. The router automatically uses a small installed model for a snappy decision (preference list baked into `lib_chat.sh`, matched against `ollama list`; falls back to the active model) — no per-machine config needed. `WEB_AUTO=0` disables triage (always search); `WEB_ROUTER_MODEL` pins a specific router model.
-- `/agent` (`/a`): Toggle Agent Mode — let the AI propose shell commands to run on your Mac. **Clearly read-only commands** (`ls`, `cat`, `grep`, `find`, `ps`, `git status`, `brew list`, …, with no pipes/redirects/`$()`) run **without a prompt**. Anything that could modify files, processes, network or system — or any composed command — shows a **warning and asks `Execute? (y/N)`**, denied by default unless you type `y`. It's a **whitelist**, not a blacklist: anything unrecognized asks first. Set `CHATI_AGENT_CONFIRM=all` to confirm *every* command (the classic behavior).
-- `/aY`: Toggle **auto-accept** (capital `Y` on purpose, so it can't happen by accident) — turns Agent Mode on and runs **every** proposed command **without asking**, including destructive ones. Shows a warning on enable; use only for a task you're actively watching (Ctrl-C interrupts). `/aY` again — or `/a` — returns to verification. `/a` and `/aY` differ only in this: `/a` asks, `/aY` doesn't (and warns). There is **no agent mode without safety** unless you deliberately type `/aY`.
+- `/shell` (`/s`): Toggle **Shell Mode** — let the AI propose shell commands to run on your Mac (you approve them). It's an *assisted* mode (you're in the loop), not an autonomous agent. **Clearly read-only commands** (`ls`, `cat`, `grep`, `find`, `ps`, `git status`, `brew list`, …, with no pipes/redirects/`$()`) run **without a prompt**. Anything that could modify files, processes, network or system — or any composed command — shows a **warning and asks `Execute? (y/N)`**, denied by default unless you type `y`. It's a **whitelist**, not a blacklist: anything unrecognized asks first. Set `CHATI_AGENT_CONFIRM=all` to confirm *every* command. (Aliases `/agent`, `/a` still work.)
+- `/sY`: Toggle **auto-accept** (capital `Y` on purpose, so it can't happen by accident) — turns Shell Mode on and runs **every** proposed command **without asking**, including destructive ones. Shows a warning on enable; use only for a task you're actively watching (Ctrl-C interrupts). `/sY` again — or `/s` — returns to verification. `/s` and `/sY` differ only in this: `/s` asks, `/sY` doesn't (and warns). There is **no Shell Mode without safety** unless you deliberately type `/sY`. (Alias `/aY` still works.)
 
 ### Input & Files
-- `/multi` (`/m`): Compose a **multiline message** in your `$EDITOR`; on save it's sent like any message (goes through `/web`, `/lang` and agent mode). Great for long or formatted prompts without buffer hacks.
+- `/multi` (`/m`): Compose a **multiline message** in your `$EDITOR`; on save it's sent like any message (goes through `/web`, `/lang` and Shell Mode). Great for long or formatted prompts without buffer hacks.
 - `/file` (`/f`) `<file> [msg]`: Send an entire file with an optional instruction.
 - `/batch` (`/s`) `[range] <file>`: Automated line-by-line batch processing.
 - `/ocr <file|folder|glob>`: OCR a single image/PDF, every image/PDF in a folder, or a glob (e.g. `/ocr ~/Downloads/scans/` or `/ocr ~/Downloads/*.png`), then analyze the combined text.
