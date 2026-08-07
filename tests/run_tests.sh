@@ -236,9 +236,9 @@ test_chati_help_documents_aliases() {
     out=$(awk '/^show_help\(\) \{/,/^}$/' "$PROJECT_DIR/chati")
     assert_match "$out" "/talk +\(/t\)" "/talk alias" \
         && assert_match "$out" "/web +\(/w\)" "/web alias" \
-        && assert_match "$out" "/agent +\(/a\)" "/agent alias" \
+        && assert_match "$out" "/shell +\(/s\)" "/shell alias" \
         && assert_match "$out" "/file +\(/f\)" "/file alias" \
-        && assert_match "$out" "/batch +\(/s\)" "/batch alias"
+        && assert_match "$out" "/batch +\(/b\)" "/batch alias"
 }
 run_test "chati help documents word+alias standard" test_chati_help_documents_aliases
 
@@ -247,12 +247,25 @@ test_chati_dispatch_has_long_forms() {
     local dispatch
     dispatch=$(sed -n '/case "\$cmd_name" in/,/esac/p' "$PROJECT_DIR/chati")
     assert_match "$dispatch" "/file\|/f\)" "/file|/f arm" \
-        && assert_match "$dispatch" "/batch\|/s\)" "/batch|/s arm" \
+        && assert_match "$dispatch" "/batch\|/b\)" "/batch|/b arm" \
         && assert_match "$dispatch" "/talk\|/t\)" "/talk|/t arm" \
         && assert_match "$dispatch" "/web\|/w\)" "/web|/w arm" \
-        && assert_match "$dispatch" "/agent\|/a\)" "/agent|/a arm"
+        && assert_match "$dispatch" "/shell\|/s" "/shell|/s arm"
 }
 run_test "chati dispatcher accepts long and short forms" test_chati_dispatch_has_long_forms
+
+test_shell_mode_rename_and_aliases() {
+    # Shell Mode (was Agent): new /shell,/s,/sY primary; /agent,/a,/aY still work.
+    local dispatch
+    dispatch=$(sed -n '/case "\$cmd_name" in/,/esac/p' "$PROJECT_DIR/chati")
+    assert_match "$dispatch" "/shell\|/s\|/agent\|/a\)" "/shell arm keeps /agent,/a aliases" || return 1
+    assert_match "$dispatch" "/sY\|/aY\)" "/sY arm keeps /aY alias" || return 1
+    # /settings labels it Shell, not Agent.
+    local settings; settings=$(awk '/^show_settings\(\) \{/,/^}$/' "$PROJECT_DIR/chati")
+    assert_match "$settings" "Shell:" "settings shows Shell" || return 1
+    if printf '%s' "$settings" | grep -q '🛠️  Agent:'; then echo "settings still says Agent" >&2; return 1; fi
+}
+run_test "Shell Mode rename keeps /agent,/a,/aY as aliases (#naming)" test_shell_mode_rename_and_aliases
 
 if [[ "${FAST:-0}" == "1" ]]; then
     phase "FAST mode: skipping phases 2 + 3"

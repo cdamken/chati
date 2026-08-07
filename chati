@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.18.3 - Ollama-Centric Chat Interface
+# Chati v1.19.0 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.18.3"
+CHATI_VERSION="1.19.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -76,7 +76,7 @@ VOICE_MODE="OFF"         # Global talk toggle
 WEB_MODE="OFF"           # Global web search toggle
 THINK_MODE="OFF"         # Show the model's reasoning (/think); reasoning models only
 AGENT_MODE="OFF"         # Global autonomous agent toggle
-AGENT_AUTOACCEPT="OFF"   # /aY: run EVERY proposed command without asking
+AGENT_AUTOACCEPT="OFF"   # /sY: run EVERY proposed command without asking
 FORCE_LANG="auto"        # Language forcing (auto, en, es, de, etc.)
 SAY_COLORS="white/green" # Default colors for speech highlighting
 SAY_SPEED=1.0            # Speech speed multiplier (1.0 = 200 wpm)
@@ -888,8 +888,8 @@ show_settings() {
         system_prompt_text=$(head -c 200 "$prompt_file")
         [[ $(wc -c < "$prompt_file") -gt 200 ]] && system_prompt_text="${system_prompt_text}…"
     fi
-    local agent_status="$AGENT_MODE   (read-only runs; risky asks y/N)"
-    [[ "$AGENT_AUTOACCEPT" == "ON" ]] && agent_status="ON 🔴 AUTO-ACCEPT (/aY: runs EVERYTHING without asking)"
+    local agent_status="$AGENT_MODE   (the AI runs shell commands you approve)"
+    [[ "$AGENT_AUTOACCEPT" == "ON" ]] && agent_status="ON 🔴 AUTO-ACCEPT (/sY: runs EVERYTHING without asking)"
     cat << EOF
 
 Current Chati Settings:
@@ -898,7 +898,7 @@ Current Chati Settings:
 🌐 Lang:     $FORCE_LANG
 🔎 Web:      $WEB_MODE
 💭 Thinking: $THINK_MODE   (/think — show reasoning; reasoning models only)
-🛠️  Agent:    $agent_status
+🐚 Shell:    $agent_status
 🗣️  Talk:     $VOICE_MODE (Voice: $DEFAULT_VOICE, Speed: ${SAY_SPEED}x, Colors: $SAY_COLORS)
 🎨 Colors:   you=$USER_COLOR_NAME · ai=$AI_COLOR_NAME  (/color to change)
 📅 Session:  $curr_sess
@@ -936,7 +936,7 @@ Input & Files:
 /multi (/m)                 Compose a multiline message in \$EDITOR, then send
                             it (goes through /web, /lang, agent — like normal).
 /file  (/f) <file> [msg]    Send a whole file with an optional instruction.
-/batch (/s) [range] <file>  Batch: send each line of <file> separately.
+/batch (/b) [range] <file>  Batch: send each line of <file> separately.
                             Example: /batch 10-20 Stocks.txt
 /ocr <file|folder|glob>     OCR an image/PDF, a whole folder of them,
                             or a glob, then analyze the text. (Just naming
@@ -959,20 +959,21 @@ Mode Toggles:
                         in normal color; the reasoning is never saved to
                         history. Only reasoning models have it (deepseek-r1,
                         gemma4, qwen3…); on a plain model /think says so.
-/agent (/a)             Toggle Agent Mode — allow the AI to propose
-                        shell commands to run on your Mac. Read-only
-                        commands (ls, cat, grep, find, ps…) run directly;
-                        anything that could modify files, processes,
-                        network or system shows a warning and asks
-                        "Execute? (y/N)" — denied unless you type y.
+/shell (/s)             Toggle Shell Mode — let the AI propose shell
+                        commands to run on your Mac (you approve them).
+                        Read-only commands (ls, cat, grep, find, ps…) run
+                        directly; anything that could modify files,
+                        processes, network or system shows a warning and
+                        asks "Execute? (y/N)" — denied unless you type y.
                         Set CHATI_AGENT_CONFIRM=all to confirm every
-                        command. Off by default.
-/aY                     Toggle AUTO-ACCEPT (capital Y, on purpose so it
+                        command. Off by default. (Aliases: /agent, /a.)
+/sY                     Toggle AUTO-ACCEPT (capital Y, on purpose so it
                         can't happen by accident): runs EVERY proposed
                         command WITHOUT asking — including destructive ones.
                         Shows a warning; only for a task you're watching.
-                        /aY again — or /a — returns to verification. There
-                        is no agent without safety unless you type /aY.
+                        /sY again — or /s — returns to verification. There
+                        is no Shell Mode without safety unless you type /sY.
+                        (Alias: /aY.)
 
 Configuration:
 --------------
@@ -1180,7 +1181,7 @@ while true; do
                     macro_fola "$f_path" "$f_instruction"
                 fi
                 ;;
-            /batch|/s)   macro_sola "$cmd_args" ;;
+            /batch|/b)   macro_sola "$cmd_args" ;;
             /talk|/t)
                 if [[ "$VOICE_MODE" == "ON" ]]; then VOICE_MODE="OFF"; else VOICE_MODE="ON"; fi
                 echo "🗣️  Auto-Voice: $VOICE_MODE" ;;
@@ -1240,30 +1241,31 @@ while true; do
                     echo "❌ Provide URL."
                 fi
                 ;;
-            /agent|/a)
-                # /a never enables auto-accept. From auto-accept it de-escalates
-                # to verification; otherwise it toggles ON(verification)/OFF.
+            /shell|/s|/agent|/a)   # /agent, /a kept as backward-compat aliases
+                # Shell Mode: the model proposes shell commands you approve. /s
+                # never enables auto-accept. From auto-accept it de-escalates to
+                # verification; otherwise it toggles ON(verification)/OFF.
                 if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
                     AGENT_AUTOACCEPT="OFF"
-                    echo "🛡️  Agent Mode: ON (verification) — auto-accept OFF; risky commands ask 'Execute? (y/N)' again."
+                    echo "🛡️  Shell: ON (verification) — auto-accept OFF; risky commands ask 'Execute? (y/N)' again."
                 elif [[ "$AGENT_MODE" == "ON" ]]; then
                     AGENT_MODE="OFF"
-                    echo "🛠️  Agent Mode: OFF — AI can no longer run shell commands."
+                    echo "🐚 Shell: OFF — the AI can no longer run shell commands."
                 else
                     AGENT_MODE="ON"
-                    echo "🛡️  Agent Mode: ON (verification) — read-only runs directly; anything that could"
-                    echo "    change files/processes/network/system asks 'Execute? (y/N)'."
+                    echo "🛡️  Shell: ON (verification) — the AI proposes commands; read-only ones run directly,"
+                    echo "    anything that could change files/processes/network/system asks 'Execute? (y/N)'."
                 fi ;;
-            /aY)   # capital Y on purpose — a deliberate, can't-happen-by-accident switch
+            /sY|/aY)   # capital Y on purpose — a deliberate, can't-happen-by-accident switch (/aY = alias)
                 if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
                     AGENT_AUTOACCEPT="OFF"   # AGENT_MODE stays ON → back to verification
-                    echo "🛡️  Agent Mode: ON (verification) — auto-accept OFF; risky commands ask again."
+                    echo "🛡️  Shell: ON (verification) — auto-accept OFF; risky commands ask again."
                 else
                     AGENT_MODE="ON"; AGENT_AUTOACCEPT="ON"
                     echo "🔴 ⚠️  AUTO-ACCEPT ON — the AI will run EVERY command it proposes on your Mac"
                     echo "       WITHOUT asking, INCLUDING destructive ones (rm, sudo, network, overwrites…)."
                     echo "       Only for a task you're actively watching. Ctrl-C interrupts."
-                    echo "       Type /aY again (or /a) to return to verification."
+                    echo "       Type /sY again (or /s) to return to verification."
                 fi ;;
             /web|/w)
                 if [[ "$WEB_MODE" == "ON" ]]; then
@@ -1458,7 +1460,7 @@ while true; do
             # (the classic behaviour).
             run_it=0
             if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
-                echo "   🔴 auto-accept (/aY) — running without asking"
+                echo "   🔴 auto-accept (/sY) — running without asking"
                 run_it=1
             elif [[ "${CHATI_AGENT_CONFIRM:-}" != "all" ]] && agent_cmd_is_safe "$agent_cmd"; then
                 echo "   ✅ read-only — running without confirmation"

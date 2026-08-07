@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.19.0] - 2026-08-07
+
+### Changed
+- **"Agent Mode" renamed to "Shell Mode" (`/shell`, `/s`, `/sY`).** In 2026
+  "agent" means an autonomous process you dispatch; chati's feature is the
+  opposite — the model proposes ONE shell command and you approve it. The new
+  name says what it does: enable shell commands (you stay in the loop). `/shell`
+  (`/s`) toggles it, `/sY` is auto-accept. The old `/agent`, `/a`, `/aY` keep
+  working as aliases, so nothing breaks. `/settings` and help now say "Shell".
+  To free `/s`, the `/batch` short alias moved to **`/b`** (`/batch` still works).
+
 ## [1.18.3] - 2026-08-07
 
 ### Fixed
