@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.22.1 - Ollama-Centric Chat Interface
+# Chati v1.23.0 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.22.1"
+CHATI_VERSION="1.23.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -992,6 +992,7 @@ Configuration:
 /ollama [n|host|local]  List reachable Ollama servers (localhost + Tailscale)
                         and switch to one for THIS session. Each server has
                         its own models.
+/ollama forget <n|host>   Remove a saved server from the list.
 /host [host|url|local]  Set the DEFAULT Ollama endpoint and save it to .env
                         (persists across restarts). /host alone shows current
                         + saved. /host local resets to localhost.
@@ -1350,24 +1351,37 @@ while true; do
                     [[ -n "$model_sel" ]] && "$OLA_MODEL_CMD" set "$model_sel"
                 fi ;;
             /ollama|/endpoint)
-                # Discover reachable Ollama servers (localhost + Tailscale peers)
-                # and switch between them. Each server has its OWN models (#39).
-                if [[ -z "$cmd_args" ]]; then
-                    echo "🛰️  Reachable Ollama endpoints:"
+                # List Ollama servers (localhost + Tailscale peers + every server
+                # you've saved before) and switch between them for THIS session.
+                # Reachable ones show a version; saved-but-asleep ones show OFFLINE
+                # but are still pickable. Each server has its OWN models (#39).
+                o_sub="${cmd_args%% *}"
+                if [[ "$o_sub" == forget ]]; then
+                    o_rest="${cmd_args#forget}"; o_rest="${o_rest# }"
+                    if [[ "$o_rest" == [0-9]* ]]; then
+                        o_rest=$(ollama_endpoints_status | sed -n "${o_rest}p" | cut -f1)
+                    fi
+                    if [[ -n "$o_rest" ]]; then forget_ollama_host "$o_rest"; echo "🗑️  Forgot $o_rest"; else echo "Usage: /ollama forget <number|host>"; fi
+                elif [[ -z "$cmd_args" ]]; then
+                    echo "🛰️  Ollama servers (reachable + saved):"
                     ollama_idx=0
                     while IFS=$'\t' read -r o_url o_ver; do
                         ollama_idx=$((ollama_idx + 1))
                         o_mark=""; [[ "$o_url" == "$OLLAMA_API" ]] && o_mark="  ← current"
-                        printf '   %d. %s  (v%s)%s\n' "$ollama_idx" "$o_url" "$o_ver" "$o_mark"
-                    done < <(discover_ollama_endpoints)
-                    [[ "$ollama_idx" -eq 0 ]] && echo "   (none found via localhost/Tailscale — you can still point at any LAN IP by hand)"
+                        if [[ "$o_ver" == OFFLINE ]]; then
+                            printf '   %d. %s  (saved, offline)%s\n' "$ollama_idx" "$o_url" "$o_mark"
+                        else
+                            printf '   %d. %s  (v%s)%s\n' "$ollama_idx" "$o_url" "$o_ver" "$o_mark"
+                        fi
+                    done < <(ollama_endpoints_status)
+                    [[ "$ollama_idx" -eq 0 ]] && echo "   (none found — you can still point at any LAN IP by hand)"
                     echo "   Current: $OLLAMA_API"
-                    echo "   Switch:  /ollama <number|host|url|local>   (e.g. /ollama 192.168.1.50:11434)"
+                    echo "   Switch:  /ollama <number|host|url|local>   ·   Forget saved:  /ollama forget <n|host>"
                 else
                     if [[ "$cmd_args" == local ]]; then
                         o_new="http://localhost:11434"
                     elif [[ "$cmd_args" == [0-9]* ]]; then
-                        o_new=$(discover_ollama_endpoints | sed -n "${cmd_args}p" | cut -f1)
+                        o_new=$(ollama_endpoints_status | sed -n "${cmd_args}p" | cut -f1)
                     elif [[ "$cmd_args" == http://* || "$cmd_args" == https://* ]]; then
                         o_new="$cmd_args"
                     else
@@ -1379,7 +1393,8 @@ while true; do
                         export OLLAMA_API="$o_new"
                         o_host="${o_new#http://}"; o_host="${o_host#https://}"
                         export OLLAMA_HOST="$o_host"   # so `ollama` CLI (/model, list, pull) hits it too
-                        echo "✅ Now using Ollama at $OLLAMA_API"
+                        remember_ollama_host "$o_host" # save it for next time (multiple servers kept)
+                        echo "✅ Now using Ollama at $OLLAMA_API  (saved for later)"
                         echo "   Its models differ from other endpoints — run /model to pick one available here."
                     else
                         echo "❌ Can't reach $o_new (is that Ollama up and exposed?)."
@@ -1417,6 +1432,7 @@ while true; do
                         echo "🏠 Endpoint reset to localhost and removed from .env."
                     else
                         export OLLAMA_HOST="$h_target"; export OLLAMA_API="http://$h_target"
+                        remember_ollama_host "$h_target"   # also list it under /ollama
                         if curl -fsS --max-time 3 "$OLLAMA_API/api/version" >/dev/null 2>&1; then
                             echo "✅ Saved default Ollama → $OLLAMA_API (in .env; active now and on next launch)."
                             echo "   Its models differ — run /model to pick one available here."
@@ -1531,6 +1547,26 @@ while true; do
         OLA_EXTRA_SYSTEM=$(agent_capability_prompt)
     else
         unset OLA_EXTRA_SYSTEM
+    fi
+
+    # Auto-fallback: if we're pointed at a REMOTE Ollama that just went away
+    # (asleep, off the network), drop back to localhost so you're not stuck.
+    # Only runs when remote, and only if localhost actually answers. Disable
+    # with CHATI_OLLAMA_FALLBACK=0.
+    if [[ "${CHATI_OLLAMA_FALLBACK:-1}" != 0 ]]; then
+        case "$OLLAMA_API" in
+            http://localhost:11434|http://127.0.0.1:11434) ;;
+            *)
+                if ! curl -fsS --max-time 3 "$OLLAMA_API/api/version" >/dev/null 2>&1; then
+                    if curl -fsS --max-time 3 "http://localhost:11434/api/version" >/dev/null 2>&1; then
+                        echo "⚠️  Lost the remote Ollama ($OLLAMA_API) — falling back to localhost." >&2
+                        export OLLAMA_API="http://localhost:11434"; export OLLAMA_HOST="localhost:11434"
+                        ensure_valid_model   # the remote's model may not exist locally; pick a valid one
+                    else
+                        echo "⚠️  Remote Ollama ($OLLAMA_API) is unreachable, and no local Ollama to fall back to." >&2
+                    fi
+                fi ;;
+        esac
     fi
 
     _ft_logged=0

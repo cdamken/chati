@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.23.0] - 2026-08-07
+
+### Added
+- **Remembered Ollama servers + auto-fallback to localhost (#39 follow-up).**
+  - Every server you switch to (via `/host` or `/ollama <addr>`) is **saved** to
+    `~/.local/share/chati/ollama_hosts`, so `/ollama` lists it again later even
+    while it's asleep (shown as `saved, offline` but still pickable). Multiple
+    servers are supported; drop one with `/ollama forget <n|host>`. localhost is
+    never saved (always implied).
+  - **Auto-fallback:** if the remote Ollama you're pointed at goes away
+    mid-session (asleep, off-network), chati drops back to **localhost**
+    automatically (only when localhost actually answers) and re-picks a valid
+    local model, so you're never stuck. Disable with `CHATI_OLLAMA_FALLBACK=0`.
+
 ## [1.22.1] - 2026-08-07
 
 ### Docs
