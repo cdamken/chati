@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.19.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.20.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -470,7 +470,7 @@ Each instance keeps its own active session, buffer, `/back` pointer and command 
 - `/voice [name]`: List or set the macOS TTS voice.
 - `/speed [0.25-3.0]`: Adjust talk speed (multiplier format).
 - `/colors [f/b]`: Set colors for speech highlighting / TTS (e.g., white/green).
-- `/color [user|ai] <name>`: Set the **chat text color** for your input vs the AI reply, so a long transcript is easy to scan. Names: default, black, red, green, yellow, blue, magenta, cyan, white, gray. Defaults: you=cyan, AI=terminal default. Persist per-machine via `CHATI_USER_COLOR` / `CHATI_AI_COLOR` in `.env`.
+- `/color`: One menu for **all colors**. `/color` alone lists them; `/color you <name>` / `/color ai <name>` set the **chat text** colors (your input vs the AI reply); `/color tts <fg/bg>` sets the **voice/TTS highlight** colors. Names: default, black, red, green, yellow, blue, magenta, cyan, white, gray. Defaults: you=cyan, AI=terminal default, tts=white/green. Persist per-machine via `CHATI_USER_COLOR` / `CHATI_AI_COLOR` in `.env`. (Old `/colors fg/bg` still works as an alias.)
 - `/settings`: Show current chat settings.
 
 ---

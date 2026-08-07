@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.19.0 - Ollama-Centric Chat Interface
+# Chati v1.20.0 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.19.0"
+CHATI_VERSION="1.20.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -900,9 +900,9 @@ Current Chati Settings:
 💭 Thinking: $THINK_MODE   (/think — show reasoning; reasoning models only)
 🐚 Shell:    $agent_status
 🗣️  Talk:     $VOICE_MODE (Voice: $DEFAULT_VOICE, Speed: ${SAY_SPEED}x, Colors: $SAY_COLORS)
-🎨 Colors:   you=$USER_COLOR_NAME · ai=$AI_COLOR_NAME  (/color to change)
+🎨 Colors:   you=$USER_COLOR_NAME · ai=$AI_COLOR_NAME · tts=$SAY_COLORS  (/color to change)
 📅 Session:  $curr_sess
-🎭 Prompt:   $system_prompt_text
+🎭 Persona:  $system_prompt_text
 
 EOF
 }
@@ -977,16 +977,17 @@ Mode Toggles:
 
 Configuration:
 --------------
-/prompt                 View the session prompt.
-/prompt <text>          Set the session prompt to a single line.
-/prompt -e              Edit the session prompt in \$EDITOR (multi-line).
-/prompt ""              Clear the session prompt.
+/persona                View the session persona (system prompt). (Alias /prompt.)
+/persona <text>         Set the session persona to a single line.
+/persona -e             Edit the persona in \$EDITOR (multi-line).
+/persona ""             Clear the persona.
 /model [idx|name]       List or switch Ollama model.
 /lang [code]            List or set response language (auto, en, es, …).
 /voice [name]           List or set TTS voice (Samantha, Anna, Paulina, …).
 /speed [mult]           Set speech speed multiplier (0.25 – 3.0).
-/colors [fg/bg]         Set say --interactive (TTS highlight) colors.
-/color [user|ai] <name> Set chat TEXT color for your input vs the AI reply
+/color                  Show the color menu (chat text + voice/TTS highlight).
+/color you|ai <name>    Set chat TEXT color for your input vs the AI reply.
+/color tts <fg/bg>      Set the voice/TTS highlight colors. (Alias: /colors fg/bg.)
                         (default black red green yellow blue magenta cyan
                         white gray). Env: CHATI_USER_COLOR / CHATI_AI_COLOR.
 
@@ -1135,7 +1136,7 @@ while true; do
                 exit 0 ;;
             /h|/help|/\?) show_help ;;
             /settings)   show_settings ;;
-            /prompt)
+            /persona|/prompt)
                 prompt_file=$(current_session_prompt_file)
                 if [[ -z "$cmd_args" ]]; then
                     if [[ -f "$prompt_file" && -s "$prompt_file" ]]; then
@@ -1185,40 +1186,43 @@ while true; do
             /talk|/t)
                 if [[ "$VOICE_MODE" == "ON" ]]; then VOICE_MODE="OFF"; else VOICE_MODE="ON"; fi
                 echo "🗣️  Auto-Voice: $VOICE_MODE" ;;
-            /colors)
-                if [[ -n "$cmd_args" ]]; then
-                    # Whitelist the input — say --interactive=COLORS expects
-                    # exactly "fg/bg" with both names from a fixed palette.
-                    # Anything else risks breaking the say invocation when
-                    # the variable is expanded.
-                    if [[ "$cmd_args" =~ ^[a-z]+/[a-z]+$ ]]; then
-                        SAY_COLORS="$cmd_args"
-                        echo "🎨 Speech colors set to: $SAY_COLORS"
-                    else
-                        echo "❌ Invalid format. Use foreground/background, e.g. white/green"
-                    fi
-                else
-                    echo "🎨 Current speech colors: $SAY_COLORS"
-                    echo "Available: black, red, green, yellow, blue, magenta, cyan, white"
-                    echo "Usage: /colors foreground/background"
-                fi
-                ;;
-            /color)
-                # Chat TEXT colors (user vs AI). Distinct from /colors (TTS).
+            # (/colors is folded into the unified /color arm below.)
+            /color|/colors)
+                # ONE place for every color: chat text (you/ai) + the voice/TTS
+                # highlight. `/color` with no args prints a menu of all of them.
+                # `/colors [fg/bg]` stays backward-compatible → the tts target.
                 csub="${cmd_args%% *}"; cval=""
                 [[ "$cmd_args" == *" "* ]] && cval="${cmd_args#* }"
+                if [[ "$cmd_name" == "/colors" && -n "$cmd_args" \
+                      && "$csub" != tts && "$csub" != voice && "$csub" != you \
+                      && "$csub" != user && "$csub" != ai ]]; then
+                    csub="tts"; cval="$cmd_args"   # legacy: /colors white/green
+                fi
                 if [[ -z "$csub" ]]; then
-                    echo "🎨 Chat text colors — you: ${USER_COLOR}${USER_COLOR_NAME}${RESET_COLOR} · AI: ${AI_COLOR}${AI_COLOR_NAME}${RESET_COLOR}"
-                    echo "   Set: /color user <name>   |   /color ai <name>"
+                    echo "🎨 Colors — set with /color <target> <value>:"
+                    echo "   Chat text:"
+                    echo "     you = ${USER_COLOR}${USER_COLOR_NAME}${RESET_COLOR}   → /color you <name>"
+                    echo "     ai  = ${AI_COLOR}${AI_COLOR_NAME}${RESET_COLOR}   → /color ai <name>"
+                    echo "   Voice highlight (TTS, spoken text):"
+                    echo "     tts = $SAY_COLORS   → /color tts <fg/bg>"
                     echo "   Names: default black red green yellow blue magenta cyan white gray"
-                elif [[ "$csub" == user && -n "$cval" ]]; then
-                    USER_COLOR_NAME="$cval"; USER_COLOR=$(ansi_color "$cval")
-                    echo "✅ Your text color → ${USER_COLOR}${cval}${RESET_COLOR}"
-                elif [[ "$csub" == ai && -n "$cval" ]]; then
-                    AI_COLOR_NAME="$cval"; AI_COLOR=$(ansi_color "$cval")
-                    echo "✅ AI text color → ${AI_COLOR}${cval}${RESET_COLOR}"
+                elif [[ "$csub" == you || "$csub" == user ]]; then
+                    if [[ -n "$cval" ]]; then
+                        USER_COLOR_NAME="$cval"; USER_COLOR=$(ansi_color "$cval")
+                        echo "✅ Your text color → ${USER_COLOR}${cval}${RESET_COLOR}"
+                    else echo "Usage: /color you <name>"; fi
+                elif [[ "$csub" == ai ]]; then
+                    if [[ -n "$cval" ]]; then
+                        AI_COLOR_NAME="$cval"; AI_COLOR=$(ansi_color "$cval")
+                        echo "✅ AI text color → ${AI_COLOR}${cval}${RESET_COLOR}"
+                    else echo "Usage: /color ai <name>"; fi
+                elif [[ "$csub" == tts || "$csub" == voice || "$csub" == speech ]]; then
+                    # say --interactive=COLORS needs exactly fg/bg from a fixed palette.
+                    if [[ "$cval" =~ ^[a-z]+/[a-z]+$ ]]; then
+                        SAY_COLORS="$cval"; echo "✅ Voice highlight (TTS) → $SAY_COLORS"
+                    else echo "❌ Use foreground/background, e.g. /color tts white/green"; fi
                 else
-                    echo "Usage: /color [user|ai] <name>   (run /color to see options)"
+                    echo "Usage: /color [you|ai <name> | tts <fg/bg>]   (run /color for the menu)"
                 fi
                 ;;
             /ocr)
