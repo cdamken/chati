@@ -733,6 +733,37 @@ test_resolve_ollama_api() {
 }
 run_test "resolve_ollama_api derives the endpoint from OLLAMA_HOST" test_resolve_ollama_api
 
+# --- per-session settings persistence (#37) ---
+eval "$(awk '/^CHATI_SETTINGS_KEYS=/,/\)/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^ansi_color\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^update_say_rate\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^settings_write\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^settings_read\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+
+test_session_settings_roundtrip() {
+    local f="$SANDBOX/A_settings"
+    FORCE_LANG=es WEB_MODE=ON THINK_MODE=OFF AGENT_MODE=ON AGENT_AUTOACCEPT=OFF \
+        VOICE_MODE=OFF DEFAULT_VOICE=Paulina SAY_SPEED=1.5 SAY_COLORS=white/green \
+        USER_COLOR_NAME=cyan AI_COLOR_NAME=green
+    settings_write "$f"
+    FORCE_LANG=auto WEB_MODE=OFF AGENT_MODE=OFF SAY_SPEED=1.0 AI_COLOR_NAME=default
+    settings_read "$f" || { echo "settings_read failed" >&2; return 1; }
+    assert_eq "$FORCE_LANG" "es" "lang restored" \
+        && assert_eq "$WEB_MODE" "ON" "web restored" \
+        && assert_eq "$AGENT_MODE" "ON" "shell restored" \
+        && assert_eq "$SAY_SPEED" "1.5" "speed restored" \
+        && assert_eq "$AI_COLOR_NAME" "green" "ai color restored"
+}
+run_test "per-session settings round-trip (write then read)" test_session_settings_roundtrip
+
+test_settings_is_a_companion() {
+    case " ${SESSION_COMPANION_SUFFIXES[*]} " in
+        *" _settings "*) : ;;
+        *) echo "_settings missing from SESSION_COMPANION_SUFFIXES" >&2; return 1 ;;
+    esac
+}
+run_test "_settings travels with rename/delete (companion suffix)" test_settings_is_a_companion
+
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
     # The critical safety property: on ANY failure (here, a model that

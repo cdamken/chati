@@ -605,7 +605,7 @@ session_msg_count() {
 # Companion file suffixes that travel with a session file. Update this
 # list and every site that manages sessions (rename/delete/autorename
 # cleanup) picks up the change automatically.
-SESSION_COMPANION_SUFFIXES=(_prompt _summary _compressed_at)
+SESSION_COMPANION_SUFFIXES=(_prompt _summary _compressed_at _settings)
 
 # Remove a session file and all its companions. Safe to call on a
 # nonexistent base file.

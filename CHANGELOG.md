@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.24.0] - 2026-08-07
+
+### Added
+- **Per-session settings + editable global defaults (#37, part 1).** Your
+  toggles now travel WITH the session: `/lang`, `/web`, `/think`, Shell (`/s`,
+  `/sY`), Talk/`/voice`/`/speed`, and the chat/TTS colors are saved when you
+  leave or `/switch` a session (and at exit), and restored when you come back —
+  so each conversation keeps its own config instead of losing it on exit. A NEW
+  session inherits the **global defaults**: `/defaults save` snapshots the
+  current settings as that default, `/defaults` shows them, `/defaults clear`
+  resets. Settings live in a `${session}_settings` companion (renamed/deleted
+  with the session). (Per-terminal TTY isolation and per-session *model* are
+  part 2, still tracked in #37.)
+
 ## [1.23.0] - 2026-08-07
 
 ### Added
