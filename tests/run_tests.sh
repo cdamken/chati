@@ -720,6 +720,17 @@ test_compress_model_override() {
 }
 run_test "compress_model honours COMPRESS_MODEL override" test_compress_model_override
 
+# --- resolve_ollama_api: external Ollama endpoint (#39) ---
+test_resolve_ollama_api() {
+    assert_eq "$(resolve_ollama_api '' '')"                  "http://localhost:11434"                  "empty -> localhost" || return 1
+    assert_eq "$(resolve_ollama_api '' 'box:11434')"         "http://box:11434"                        "host:port -> url" || return 1
+    assert_eq "$(resolve_ollama_api '' 'box')"               "http://box:11434"                        "bare host -> +default port" || return 1
+    assert_eq "$(resolve_ollama_api '' '0.0.0.0:11434')"     "http://localhost:11434"                  "0.0.0.0 bind -> localhost" || return 1
+    assert_eq "$(resolve_ollama_api '' 'http://box:9')"      "http://box:9"                            "scheme kept" || return 1
+    assert_eq "$(resolve_ollama_api 'http://x:1' 'box:2')"   "http://x:1"                              "explicit OLLAMA_API wins"
+}
+run_test "resolve_ollama_api derives the endpoint from OLLAMA_HOST" test_resolve_ollama_api
+
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
     # The critical safety property: on ANY failure (here, a model that

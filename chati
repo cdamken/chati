@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Chati v1.20.0 - Ollama-Centric Chat Interface
+# Chati v1.21.0 - Ollama-Centric Chat Interface
 #==============================================================================
 set -o pipefail
 # Resolve this script's REAL directory, following symlinks, so chati works
@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.20.0"
+CHATI_VERSION="1.21.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -890,11 +890,18 @@ show_settings() {
     fi
     local agent_status="$AGENT_MODE   (the AI runs shell commands you approve)"
     [[ "$AGENT_AUTOACCEPT" == "ON" ]] && agent_status="ON 🔴 AUTO-ACCEPT (/sY: runs EVERYTHING without asking)"
+    # Show the endpoint next to the model only when it's a remote Ollama (#39),
+    # so a local session stays uncluttered but a remote one is obvious.
+    local model_where=""
+    case "$OLLAMA_API" in
+        http://localhost:11434|http://127.0.0.1:11434) ;;
+        *) model_where="   🛰️  $OLLAMA_API" ;;
+    esac
     cat << EOF
 
 Current Chati Settings:
 ==========================
-🤖 Model:    $curr_model
+🤖 Model:    $curr_model$model_where
 🌐 Lang:     $FORCE_LANG
 🔎 Web:      $WEB_MODE
 💭 Thinking: $THINK_MODE   (/think — show reasoning; reasoning models only)
@@ -982,6 +989,9 @@ Configuration:
 /persona -e             Edit the persona in \$EDITOR (multi-line).
 /persona ""             Clear the persona.
 /model [idx|name]       List or switch Ollama model.
+/ollama [n|host|local]  List reachable Ollama servers (localhost + Tailscale)
+                        and switch to one. Each server has its own models.
+                        Set a default in .env with OLLAMA_HOST.
 /lang [code]            List or set response language (auto, en, es, …).
 /voice [name]           List or set TTS voice (Samantha, Anna, Paulina, …).
 /speed [mult]           Set speech speed multiplier (0.25 – 3.0).
@@ -1335,6 +1345,39 @@ while true; do
                     # model. Prompt for the choice right here instead.
                     read -e -rp "Select a model number or name (Enter to cancel): " model_sel
                     [[ -n "$model_sel" ]] && "$OLA_MODEL_CMD" set "$model_sel"
+                fi ;;
+            /ollama|/endpoint)
+                # Discover reachable Ollama servers (localhost + Tailscale peers)
+                # and switch between them. Each server has its OWN models (#39).
+                if [[ -z "$cmd_args" ]]; then
+                    echo "🛰️  Reachable Ollama endpoints:"
+                    ollama_idx=0
+                    while IFS=$'\t' read -r o_url o_ver; do
+                        ollama_idx=$((ollama_idx + 1))
+                        o_mark=""; [[ "$o_url" == "$OLLAMA_API" ]] && o_mark="  ← current"
+                        printf '   %d. %s  (v%s)%s\n' "$ollama_idx" "$o_url" "$o_ver" "$o_mark"
+                    done < <(discover_ollama_endpoints)
+                    [[ "$ollama_idx" -eq 0 ]] && echo "   (none found — is Ollama running, and Tailscale up?)"
+                    echo "   Current: $OLLAMA_API"
+                    echo "   Switch:  /ollama <number|host|url|local>"
+                else
+                    case "$cmd_args" in
+                        local)          o_new="http://localhost:11434" ;;
+                        [0-9]*)         o_new=$(discover_ollama_endpoints | sed -n "${cmd_args}p" | cut -f1) ;;
+                        http://*|https://*) o_new="$cmd_args" ;;
+                        *)              o_new="http://$cmd_args"; [[ "$cmd_args" != *:* ]] && o_new="http://$cmd_args:11434" ;;
+                    esac
+                    if [[ -z "$o_new" ]]; then
+                        echo "❌ No endpoint #$cmd_args in the list — run /ollama to see them."
+                    elif curl -fsS --max-time 3 "$o_new/api/version" >/dev/null 2>&1; then
+                        export OLLAMA_API="$o_new"
+                        o_host="${o_new#http://}"; o_host="${o_host#https://}"
+                        export OLLAMA_HOST="$o_host"   # so `ollama` CLI (/model, list, pull) hits it too
+                        echo "✅ Now using Ollama at $OLLAMA_API"
+                        echo "   Its models differ from other endpoints — run /model to pick one available here."
+                    else
+                        echo "❌ Can't reach $o_new (is that Ollama up and exposed?)."
+                    fi
                 fi ;;
             /lang)
                 if [[ -z "$cmd_args" ]]; then

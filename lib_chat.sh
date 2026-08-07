@@ -95,7 +95,46 @@ export OLA_MODEL_CMD="${OLA_MODEL_CMD:-$OLA_DIR/ola_model}"
 export DOCR_CMD="${DOCR_CMD:-$DOCR_DIR/docr}"
 
 # --- OLLAMA ---
-export OLLAMA_API="${OLLAMA_API:-http://localhost:11434}"
+# Resolve the Ollama endpoint URL (#39 — use an external/more powerful Ollama).
+# Priority: an explicit OLLAMA_API wins; else derive it from OLLAMA_HOST — the
+# same var the `ollama` CLI reads, so chat (curl) AND model list/pull/`/model`
+# all hit the same box; else localhost. Normalizes a bare host (adds :11434), a
+# scheme-less host (adds http://), and treats a 0.0.0.0 bind as localhost for
+# the client (that value is a server bind, e.g. from `ailocal lan on`).
+resolve_ollama_api() {
+    local api="${1:-}" host="${2:-}"
+    if [[ -n "$api" ]]; then printf '%s\n' "$api"; return 0; fi
+    if [[ -n "$host" ]]; then
+        if [[ "$host" == http://* || "$host" == https://* ]]; then
+            printf '%s\n' "${host//0.0.0.0/localhost}"; return 0
+        fi
+        [[ "$host" != *:* ]] && host="$host:11434"
+        printf 'http://%s\n' "${host//0.0.0.0/localhost}"; return 0
+    fi
+    printf 'http://localhost:11434\n'
+}
+export OLLAMA_API="$(resolve_ollama_api "${OLLAMA_API:-}" "${OLLAMA_HOST:-}")"
+
+# Print reachable Ollama endpoints as "URL<TAB>version", one per line: localhost
+# plus online Tailscale peers on :11434. Powers the `/ollama` discovery picker.
+discover_ollama_endpoints() {
+    local port="${OLLAMA_DISCOVER_PORT:-11434}" host ver u seen=","
+    local -a cands=(localhost)
+    if command -v tailscale >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        while IFS= read -r host; do [[ -n "$host" ]] && cands+=("$host"); done < <(
+            tailscale status --json 2>/dev/null \
+              | jq -r '([.Self] + ((.Peer // {}) | to_entries | map(.value)))[]
+                       | select(.Online == true) | (.DNSName // "") | sub("\\.$";"")' 2>/dev/null \
+              | grep -v '^$')
+    fi
+    for host in "${cands[@]}"; do
+        [[ "$seen" == *",$host,"* ]] && continue
+        seen="$seen$host,"
+        u="http://$host:$port"
+        ver=$(curl -fsS --max-time 2 "$u/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
+        [[ -n "$ver" ]] && printf '%s\t%s\n' "$u" "$ver"
+    done
+}
 # Single source of truth for the default model. Override via the env if
 # you want a different fallback when no $ACTIVE_MODEL_FILE exists yet.
 export DEFAULT_MODEL="${DEFAULT_MODEL:-gemma4:26b}"
