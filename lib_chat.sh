@@ -135,6 +135,52 @@ discover_ollama_endpoints() {
         [[ -n "$ver" ]] && printf '%s\t%s\n' "$u" "$ver"
     done
 }
+
+# Remembered Ollama servers you've switched to before (one host:port per line),
+# so /ollama can offer them again even while they're asleep. Multiple servers
+# are supported — the file just accumulates them (deduped). localhost is never
+# saved (it's always implied).
+KNOWN_OLLAMA_HOSTS_FILE="${KNOWN_OLLAMA_HOSTS_FILE:-$CHATI_DATA_HOME/ollama_hosts}"
+remember_ollama_host() {
+    local h="$1"
+    h="${h#http://}"; h="${h#https://}"; h="${h%/}"
+    [[ -z "$h" || "$h" == localhost:* || "$h" == 127.0.0.1:* ]] && return 0
+    mkdir -p "$(dirname "$KNOWN_OLLAMA_HOSTS_FILE")" 2>/dev/null
+    grep -qxF "$h" "$KNOWN_OLLAMA_HOSTS_FILE" 2>/dev/null && return 0
+    printf '%s\n' "$h" >> "$KNOWN_OLLAMA_HOSTS_FILE"
+}
+forget_ollama_host() {   # remove one saved host (exact host:port), used by /ollama forget
+    local h="$1"; h="${h#http://}"; h="${h#https://}"; h="${h%/}"
+    [[ -f "$KNOWN_OLLAMA_HOSTS_FILE" ]] || return 0
+    local t; t=$(mktemp); grep -vxF "$h" "$KNOWN_OLLAMA_HOSTS_FILE" > "$t" 2>/dev/null; mv "$t" "$KNOWN_OLLAMA_HOSTS_FILE"
+}
+
+# Print "URL<TAB>version|OFFLINE" for every candidate endpoint: localhost, online
+# Tailscale peers, AND every remembered server (deduped). Reachable ones show
+# their version; saved-but-down ones show OFFLINE so you can still pick them.
+ollama_endpoints_status() {
+    local port="${OLLAMA_DISCOVER_PORT:-11434}" host u ver seen=","
+    local -a urls=("http://localhost:$port")
+    if command -v tailscale >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        while IFS= read -r host; do [[ -n "$host" ]] && urls+=("http://$host:$port"); done < <(
+            tailscale status --json 2>/dev/null \
+              | jq -r '([.Self] + ((.Peer // {}) | to_entries | map(.value)))[]
+                       | select(.Online == true) | (.DNSName // "") | sub("\\.$";"")' 2>/dev/null \
+              | grep -v '^$')
+    fi
+    if [[ -f "$KNOWN_OLLAMA_HOSTS_FILE" ]]; then
+        while IFS= read -r host; do
+            [[ -z "$host" ]] && continue
+            case "$host" in http://*|https://*) urls+=("$host") ;; *) urls+=("http://$host") ;; esac
+        done < "$KNOWN_OLLAMA_HOSTS_FILE"
+    fi
+    for u in "${urls[@]}"; do
+        [[ "$seen" == *",$u,"* ]] && continue
+        seen="$seen$u,"
+        ver=$(curl -fsS --max-time 2 "$u/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
+        printf '%s\t%s\n' "$u" "${ver:-OFFLINE}"
+    done
+}
 # Single source of truth for the default model. Override via the env if
 # you want a different fallback when no $ACTIVE_MODEL_FILE exists yet.
 export DEFAULT_MODEL="${DEFAULT_MODEL:-gemma4:26b}"
