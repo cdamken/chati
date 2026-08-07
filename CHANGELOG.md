@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.20.0] - 2026-08-07
+
+### Changed
+- **Unified color config + `/persona` (naming polish).** All color settings now
+  live under one `/color` command: `/color` alone shows a menu (chat text +
+  voice/TTS highlight); `/color you|ai <name>` sets the chat colors and
+  `/color tts <fg/bg>` the spoken-highlight colors. This retires the confusing
+  near-twins `/color` vs `/colors` (the old `/colors fg/bg` still works as an
+  alias). And `/prompt` is now **`/persona`** (clearer: it sets the session's
+  role/persona; `/prompt` kept as an alias). `/settings` shows "Persona" and a
+  `tts=` entry in the Colors line.
+
 ## [1.19.0] - 2026-08-07
 
 ### Changed
