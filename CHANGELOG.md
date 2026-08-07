@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.25.4] - 2026-08-08
+
+### Fixed
+- **A cold big model no longer trips the streaming stall guard (#50).** The guard
+  aborts a stream after ~300s under 1 byte/sec, but a cold-loading big model
+  (e.g. `gemma4:31b`, ~19 GB) can emit zero bytes for minutes while it loads, so
+  the load itself looked like a stall (`curl: (28) Operation too slow`). `ola`
+  now warms the model first (`POST /api/generate` with just the model name, a
+  generous `OLA_LOAD_TIMEOUT`=900s and no stall guard), so cold-load time never
+  counts against the stream; the guard then only catches real mid-stream stalls.
+  A model already resident returns from the preload instantly.
+
 ## [1.25.3] - 2026-08-07
 
 ### Fixed
