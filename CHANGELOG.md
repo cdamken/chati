@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.25.0] - 2026-08-07
+
+### Changed
+- **Per-terminal isolation by default (#37, part 2).** With no explicit
+  `CHATI_INSTANCE`, chati now derives one from the controlling terminal (tty),
+  so each window/pane keeps its OWN active session, live buffer and model — two
+  terminals no longer clobber each other's session or model. The same terminal
+  resumes its state across relaunches; a different terminal is independent (it
+  starts fresh — your saved sessions are still shared, reachable with
+  `/switch`). Falls back to the shared instance when there's no tty (pipes,
+  scripts, tests), so non-interactive use is unchanged. **Model is now
+  per-terminal** (`/model` in one window doesn't change another), falling back
+  to the global default (your usual model) when a terminal hasn't chosen one.
+
 ## [1.24.0] - 2026-08-07
 
 ### Added

@@ -296,6 +296,8 @@ export BASE_DIR="$SANDBOX"
 # Keep the checkout-independent data home inside the sandbox too (1.10+), so the
 # derived STATE_DIR / mkdir never touch the real ~/.local/share during tests.
 export CHATI_DATA_HOME="$SANDBOX"
+# Pin the instance so tests never auto-derive one from the tty (#37).
+export CHATI_INSTANCE="test"
 # Keep test logging out of the user's real ~/logs/chati.log.
 export LOG_FILE="$SANDBOX/chati.log"
 export OLA_DIR="$SANDBOX/ola_chat"
@@ -732,6 +734,18 @@ test_resolve_ollama_api() {
     assert_eq "$(resolve_ollama_api 'http://x:1' 'box:2')"   "http://x:1"                              "explicit OLLAMA_API wins"
 }
 run_test "resolve_ollama_api derives the endpoint from OLLAMA_HOST" test_resolve_ollama_api
+
+# --- per-terminal model with global fallback (#37 part 2) ---
+test_active_model_two_tier() {
+    local gi="$SANDBOX/gm.txt" pi="$SANDBOX/pi.txt"
+    echo "global:1b" > "$gi"; : > "$pi"     # per-instance empty
+    local r; r=$(ACTIVE_MODEL_FILE="$pi" GLOBAL_MODEL_FILE="$gi" active_model)
+    assert_eq "$r" "global:1b" "empty per-instance falls back to GLOBAL model" || return 1
+    echo "inst:2b" > "$pi"
+    r=$(ACTIVE_MODEL_FILE="$pi" GLOBAL_MODEL_FILE="$gi" active_model)
+    assert_eq "$r" "inst:2b" "per-instance model wins over global"
+}
+run_test "active_model: per-terminal choice with global fallback" test_active_model_two_tier
 
 # --- per-session settings persistence (#37) ---
 eval "$(awk '/^CHATI_SETTINGS_KEYS=/,/\)/' "$PROJECT_DIR/chati")"
