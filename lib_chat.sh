@@ -117,6 +117,11 @@ export MAX_COMPRESS_CHARS="${MAX_COMPRESS_CHARS:-10000}"
 # curl timeouts in seconds. Long for streaming chat, short for meta calls.
 export OLA_CURL_TIMEOUT="${OLA_CURL_TIMEOUT:-600}"
 export OLA_CURL_META_TIMEOUT="${OLA_CURL_META_TIMEOUT:-60}"
+# Stall guard for streaming: abort if the model sends effectively nothing
+# (<1 byte/s) for this many seconds, instead of waiting out OLA_CURL_TIMEOUT.
+# Catches a wedged/cold-loading big model or a sleeping host in minutes, not
+# 10+ min of 0 bytes (#35). Generous enough not to kill a slow cold load.
+export OLA_STALL_TIMEOUT="${OLA_STALL_TIMEOUT:-300}"
 # Web search scratch dir. chati's do_web_research creates a fresh
 # `turn.XXXXXX` subdir here per turn (mktemp -d) and wipes it after the
 # answer lands. Nothing else persists, so there's no TTL knob anymore.
@@ -450,6 +455,22 @@ active_model() {
         return 0
     fi
     printf '%s\n' "$DEFAULT_MODEL"
+}
+
+# Model for BACKGROUND meta tasks — memory compaction and auto-titling. These
+# must NOT use the big answer model: a 26B/31B cold-loading behind the chat
+# turn made compaction time out (exit 28) and silently drop the summary (#35).
+# Prefer a small installed chat model (fast, no GPU contention); fall back to
+# the active model only if nothing lighter is installed. COMPRESS_MODEL overrides.
+COMPRESS_PREFERENCES=("llama3.1:8b-instruct-q8_0" "llama3.1:8b" "gemma3:4b" "gemma4:e4b" "qwen2.5:7b")
+compress_model() {
+    if [[ -n "${COMPRESS_MODEL:-}" ]]; then printf '%s\n' "$COMPRESS_MODEL"; return 0; fi
+    local installed m
+    installed=$(ollama list 2>/dev/null | tail -n +2 | awk 'NF{print $1}')
+    for m in "${COMPRESS_PREFERENCES[@]}"; do
+        printf '%s\n' "$installed" | grep -qxF "$m" && { printf '%s\n' "$m"; return 0; }
+    done
+    active_model
 }
 
 # Preferred lightweight models for quick triage decisions (the /web

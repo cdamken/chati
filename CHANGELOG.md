@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.18.3] - 2026-08-07
+
+### Fixed
+- **Streaming no longer hangs for 10+ minutes on a stuck/cold-loading model, and
+  background compaction stops timing out (#35).** Two causes:
+  1. The chat stream only had an overall `--max-time`, so a wedged or cold-
+     loading big model (or a sleeping host) produced 0 bytes for the whole
+     timeout before failing with a generic error. Added a stall guard
+     (`--speed-limit 1 --speed-time $OLA_STALL_TIMEOUT`, default 300s, plus a
+     10s connect timeout) so it aborts in minutes, and the error now names the
+     likely cause (big model cold-loading / low memory / asleep) with fixes
+     (smaller model via /model, `ailocal awake on`).
+  2. Background memory compaction and auto-titling used the big ANSWER model
+     (`active_model`), so they timed out behind it and silently dropped the
+     summary. They now use a small `compress_model` (COMPRESS_MODEL overrides).
+  Also: the test suite no longer writes to the real `~/logs/chati.log`.
+
 ## [1.18.2] - 2026-08-07
 
 ### Changed

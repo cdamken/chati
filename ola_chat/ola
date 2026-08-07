@@ -142,6 +142,8 @@ printf "🤔 " >&2
 #            preserved across printf+cat)
 #   tee    — mirrors the full reply into the side-channel file
 if ! curl -sS --no-buffer --max-time "${OLA_CURL_TIMEOUT:-600}" \
+        --connect-timeout 10 \
+        --speed-limit 1 --speed-time "${OLA_STALL_TIMEOUT:-300}" \
         -X POST "$OLLAMA_API/api/chat" \
         -H "Content-Type: application/json" \
         --data-binary "@$PAYLOAD_FILE" \
@@ -161,8 +163,8 @@ if ! curl -sS --no-buffer --max-time "${OLA_CURL_TIMEOUT:-600}" \
     echo "" >&2
     log_chat "ola: streaming failed (model=$OLLAMA_MODEL)"
     rollback_user_turn
-    error_exit "Streaming failed — no response, a timeout, or a non-JSON error (e.g. a proxy 5xx)." \
-        "Check that Ollama is reachable at $OLLAMA_API."
+    error_exit "No response from '$OLLAMA_MODEL' (timeout, stall, or a non-JSON error)." \
+        "A big model (e.g. gemma4:31b) may be cold-loading, or the Mac may be low on memory or asleep. Try a smaller model with /model, keep it awake with 'ailocal awake on', and check Ollama at $OLLAMA_API."
 fi
 
 # Trailing newline so the next prompt starts on a fresh line.

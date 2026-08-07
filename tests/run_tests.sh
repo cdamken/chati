@@ -281,6 +281,8 @@ export BASE_DIR="$SANDBOX"
 # Keep the checkout-independent data home inside the sandbox too (1.10+), so the
 # derived STATE_DIR / mkdir never touch the real ~/.local/share during tests.
 export CHATI_DATA_HOME="$SANDBOX"
+# Keep test logging out of the user's real ~/logs/chati.log.
+export LOG_FILE="$SANDBOX/chati.log"
 export OLA_DIR="$SANDBOX/ola_chat"
 export DOCR_DIR="$SANDBOX/docr"
 export HISTORY_DIR="$SANDBOX/conversation_histories"
@@ -697,6 +699,13 @@ test_decompose_model_picks_mid_model() {
     assert_eq "$r" "gemma4:31b" "falls back to active_model when no preference installed"
 }
 run_test "decompose_model prefers an installed mid model, else active_model" test_decompose_model_picks_mid_model
+
+# --- compress_model: light model for background compaction/titling (#35) ---
+test_compress_model_override() {
+    local r; r=$(COMPRESS_MODEL="tiny:1b" compress_model)
+    assert_eq "$r" "tiny:1b" "COMPRESS_MODEL override is honoured"
+}
+run_test "compress_model honours COMPRESS_MODEL override" test_compress_model_override
 
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
