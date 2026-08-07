@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.18.2] - 2026-08-07
+
+### Changed
+- **Smarter /web triage: local/disk actions no longer trigger a web search (#33).**
+  With `/web` on, the router ran on every message and, being SEARCH-biased with
+  no notion of local work, would web-search a disk task ("organize my Downloads",
+  "read ~/contract.pdf"). It now reasons on two axes and takes the Agent-Mode
+  signal: an action on your own machine/files -> DIRECT (no search), while a task
+  that must FETCH from the internet -> SEARCH even if it then saves locally
+  (e.g. "download cat images into ~/Downloads"). `augment_message` passes the
+  `/a`/`/aY` state to the router. Verified live: organize/read-local -> DIRECT,
+  download-images/current-price -> SEARCH.
+
 ## [1.18.1] - 2026-08-06
 
 ### Fixed
