@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.25.3] - 2026-08-07
+
+### Fixed
+- **Ctrl-C no longer quits chati — it interrupts the current turn and returns
+  to the prompt.** With no INT trap in the main REPL, pressing Ctrl-C while the
+  model was streaming killed the foreground `ola` and the signal propagated up,
+  terminating the whole session. Now a main-shell trap catches SIGINT: it stops
+  the in-flight generation (or a pending Shell-mode command / confirmation) and
+  drops you back to `> `. The prompt reprints on Ctrl-C at idle; Ctrl-D (EOF)
+  still exits cleanly. The `/batch` cancel handler was restoring `trap - INT`
+  (uncaught) on finish — it now reinstalls the main-loop handler so the next
+  Ctrl-C after a batch is still caught.
+
 ## [1.25.2] - 2026-08-07
 
 ### Changed

@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.25.2"
+CHATI_VERSION="1.25.3"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -375,6 +375,12 @@ send_and_capture() {
         "$CHAT_CMD" "$@"
         [[ -n "$AI_COLOR" ]] && printf '%s' "$RESET_COLOR"
     fi
+    # Ctrl-C during streaming: ola was killed and the main-loop INT trap set
+    # the flag. Bail before speaking/compressing a truncated reply — the loop
+    # drops back to the prompt instead of exiting chati.
+    if (( ${_chati_interrupted:-0} )); then
+        return 130
+    fi
     LAST_RESPONSE=$(cat "$LAST_RESPONSE_FILE" 2>/dev/null || echo "")
     speak_if_enabled "$LAST_RESPONSE"
     maybe_compress
@@ -696,7 +702,9 @@ macro_sola() {
         (( interrupted )) && break
         "$MOLA_CMD" save > /dev/null
     done < <(sed -n "${start_line},${end_line}p" "$file")
-    trap - INT
+    # Restore the main-loop INT handler (not `trap - INT`, which would leave
+    # Ctrl-C uncaught and let the next one kill the whole REPL).
+    trap '_chati_interrupted=1' INT
 
     echo ""
     if (( interrupted )); then
@@ -1146,7 +1154,15 @@ load_active_settings
 show_settings
 echo "Type /h for help | /bye to exit."
 
+# Ctrl-C interrupts the current turn (stops the AI, cancels an agent step)
+# and returns to the prompt — it must NOT quit chati. Without a main-shell
+# INT trap, SIGINT killing the foreground `ola` propagates and terminates
+# the whole REPL. The flag is reset at the top of every iteration.
+_chati_interrupted=0
+trap '_chati_interrupted=1' INT
+
 while true; do
+    _chati_interrupted=0
     curr_sess=$(cat "$PREVIOUS_FILE" 2>/dev/null)
     if [[ -z "$curr_sess" ]]; then
         # Fresh terminal (its own tty) with no session yet — not an error,
@@ -1163,8 +1179,12 @@ while true; do
     # transcript). Emitted around read, not inside the prompt string, so
     # readline's width math for "> " stays correct.
     [[ -n "$USER_COLOR" ]] && printf '%s' "$USER_COLOR"
-    read -e -rp "> " msg
+    read -e -rp "> " msg; _read_rc=$?
     [[ -n "$USER_COLOR" ]] && printf '%s' "$RESET_COLOR"
+    # Ctrl-C at the prompt: just draw a fresh prompt (don't exit).
+    if (( _chati_interrupted )); then echo; continue; fi
+    # Ctrl-D / EOF: read fails with empty input — exit cleanly.
+    if (( _read_rc != 0 )); then echo; break; fi
     [[ -z "$msg" ]] && continue
     history -s "$msg"   # in-memory only; trap flushes on exit
 
@@ -1652,6 +1672,13 @@ while true; do
     while true; do
         send_and_capture "$msg"
 
+        # Ctrl-C during generation: stop this turn, back to the prompt.
+        if (( _chati_interrupted )); then
+            echo
+            echo "🛑 Stopped."
+            break
+        fi
+
         # Fine-tuning log (#12): capture the user turn once — instruction, the
         # context actually sent, and the reply — before any agent sub-steps.
         if [[ "$_ft_logged" == 0 ]]; then
@@ -1677,6 +1704,7 @@ while true; do
             else
                 echo "   ⚠️  This may modify files, processes, network or system — review it."
                 read -rp "✅ Execute? (y/N): " confirm
+                if (( _chati_interrupted )); then echo; echo "🛑 Stopped."; break; fi
                 agent_confirmed "$confirm" && run_it=1
             fi
             if [[ "$run_it" == 1 ]]; then
@@ -1685,6 +1713,7 @@ while true; do
                 # the user's next prompt / hang the loop).
                 agent_output=$(bash -c "$agent_cmd" </dev/null 2>&1)
                 agent_exit=$?
+                if (( _chati_interrupted )); then echo; echo "🛑 Stopped."; break; fi
                 if [[ -z "$agent_output" ]]; then
                     if (( agent_exit == 0 )); then
                         echo "📄 Output: (no output, exit=0 — command succeeded)"
