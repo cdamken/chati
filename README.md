@@ -321,6 +321,20 @@ export OLLAMA_API=http://your-mac.your-tailnet.ts.net:11434
 
 > ⚠️ **Ollama has no authentication.** On the raw LAN, anyone who can reach the port can use or delete your models — only enable on a trusted network, or rely on Tailscale (private, your devices only). This exposes only Ollama; OpenWebUI/SearXNG stay localhost.
 
+### Remote server refuses connections after an Ollama upgrade
+
+If a remote server suddenly stops answering from other machines — `localhost` on the server still works, but clients get `Connection reset by peer` (errno 54) or `Empty reply from server` — the usual cause is a **stale `ollama serve` left running the old binary after an upgrade**. It keeps listening on `*:11434` and accepts loopback, but drops every non-loopback (LAN/Tailscale) connection. It looks like a firewall problem, but it is not.
+
+Fix it by restarting the server so the current binary takes over:
+
+```bash
+pkill -f "ollama serve"
+OLLAMA_HOST=0.0.0.0:11434 ollama serve   # or: ailocal restart
+curl -sS http://<server-ip>:11434/api/version   # verify from the server host
+```
+
+Running Ollama under a KeepAlive service (LaunchAgent/systemd) avoids this, because an upgrade never leaves a stale instance serving. See [#52](https://github.com/cdamken/chati/issues/52).
+
 ### Keeping a server Mac awake
 
 A Mac that sleeps stops answering — even over Tailscale — so a machine you use as a shared Ollama endpoint should stay awake while it serves. Ollama can look "alive" (`/api/tags` responds) yet return **empty generations** when the Mac is in low-power sleep; keeping it awake fixes that.
