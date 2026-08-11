@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.26.1] - 2026-08-11
+
+### Fixed
+- **chati no longer hangs at startup when `.env` points at an unreachable
+  Ollama.** If a saved `OLLAMA_HOST` (via `/host`) named a remote box that was
+  down, startup tried to launch a LOCAL `ollama serve` and wait for it — but
+  with `OLLAMA_HOST` set to a remote address the server can't even bind, so the
+  readiness loop spun and the session appeared frozen right after the banner
+  (`🚀 Starting 'ollama serve'…`). Now startup detects a remote endpoint and,
+  instead of starting a local server, **falls back to localhost when it
+  answers** (so chats keep working) or prints a clear note and continues —
+  never blocks. Point back at the remote with `/host <name>` once it's up.
+
 ## [1.26.0] - 2026-08-11
 
 ### Added
