@@ -27,7 +27,16 @@ EOF
 
 check_ollama() {
     if ! ollama list >/dev/null 2>&1; then
-        error_exit "Ollama is not running. Start it with: ailocal startollama"
+        # Tailor the message: a local endpoint means "start Ollama"; a remote one
+        # (via /host or /ollama) means the OTHER machine is asleep/unexposed, not
+        # that you need to start something here (#55).
+        local ep="${OLLAMA_API:-${OLLAMA_HOST:-localhost:11434}}"
+        case "$ep" in
+            *localhost*|*127.0.0.1*|*0.0.0.0*|"")
+                error_exit "Ollama is not running. Start it with: ailocal startollama" ;;
+            *)
+                error_exit "Can't reach the Ollama endpoint at $ep. Is that machine awake and Ollama exposed there? Use /ollama to pick another server, or /host local to go back to this Mac." ;;
+        esac
     fi
 }
 

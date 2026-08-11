@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.25.5-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.26.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -333,7 +333,14 @@ OLLAMA_HOST=0.0.0.0:11434 ollama serve   # or: ailocal restart
 curl -sS http://<server-ip>:11434/api/version   # verify from the server host
 ```
 
-Running Ollama under a KeepAlive service (LaunchAgent/systemd) avoids this, because an upgrade never leaves a stale instance serving. See [#52](https://github.com/cdamken/chati/issues/52).
+The same wedge happens after the server Mac **sleeps and wakes**: Ollama keeps running but stops accepting on the real interfaces. Turn on the self-healer so it recovers on its own:
+
+```bash
+ailocal autoheal on    # probes reachability every 120s, restarts Ollama if the bind is wedged
+ailocal heal           # run the check once by hand
+```
+
+It runs via a LaunchAgent (launchd fires it right after wake too), so a stale or post-sleep bind is restored within ~2 minutes without you touching anything. No-op unless `ailocal lan on` is set. See [#52](https://github.com/cdamken/chati/issues/52) and [#55](https://github.com/cdamken/chati/issues/55).
 
 ### Keeping a server Mac awake
 
