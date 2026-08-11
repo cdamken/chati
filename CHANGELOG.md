@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.25.5] - 2026-08-11
+
+### Changed
+- **`/host` and `/ollama` default the port to 11434 consistently.** A bare host
+  already worked (`/host heather` → `heather:11434`); now a full URL with a
+  scheme but no port does too (`/host http://heather` used to hit `:80`, now
+  `heather:11434`). An explicit port or a URL with a path is left untouched.
+  Help text for `/host` now spells out the default.
+
 ## [1.25.4] - 2026-08-08
 
 ### Fixed

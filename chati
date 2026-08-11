@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.25.4"
+CHATI_VERSION="1.25.5"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -1051,8 +1051,9 @@ Configuration:
                         its own models.
 /ollama forget <n|host>   Remove a saved server from the list.
 /host [host|url|local]  Set the DEFAULT Ollama endpoint and save it to .env
-                        (persists across restarts). /host alone shows current
-                        + saved. /host local resets to localhost.
+                        (persists across restarts). Port defaults to 11434, so
+                        /host heather means heather:11434. /host alone shows
+                        current + saved. /host local resets to localhost.
 /lang [code]            List or set response language (auto, en, es, …).
 /voice [name]           List or set TTS voice (Samantha, Anna, Paulina, …).
 /speed [mult]           Set speech speed multiplier (0.25 – 3.0).
@@ -1483,6 +1484,8 @@ while true; do
                         o_new=$(ollama_endpoints_status | sed -n "${cmd_args}p" | cut -f1)
                     elif [[ "$cmd_args" == http://* || "$cmd_args" == https://* ]]; then
                         o_new="$cmd_args"
+                        o_rest="${cmd_args#http*://}"
+                        [[ "$o_rest" != *:* && "$o_rest" != */* ]] && o_new="$cmd_args:11434"
                     else
                         o_new="http://$cmd_args"; [[ "$cmd_args" != *:* ]] && o_new="http://$cmd_args:11434"
                     fi
@@ -1515,6 +1518,9 @@ while true; do
                         h_target=""
                     elif [[ "$cmd_args" == http://* || "$cmd_args" == https://* ]]; then
                         h_target="${cmd_args#http*://}"
+                        # Default the port here too: a scheme with no port (e.g.
+                        # http://heather) would otherwise hit :80, not :11434.
+                        [[ "$h_target" != *:* && "$h_target" != */* ]] && h_target="$h_target:11434"
                     else
                         h_target="$cmd_args"; [[ "$h_target" != *:* ]] && h_target="$h_target:11434"
                     fi
