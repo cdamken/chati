@@ -513,7 +513,10 @@ if [[ "$WANT_SEARXNG" -eq 1 && "$SEARXNG_STARTED" -eq 1 ]]; then
 fi
 cat <<EOF
 Service status:          ailocal status
+Serve to other machines: ailocal lan on
 /web helpers:            llama3.2:3b (route) + llama3.1:8b (queries) — auto-pulled
 Uninstall everything:    ./setup.sh --remove-all
 EOF
+echo "  (Ollama has no auth — 'lan on' exposes it on your LAN/Tailscale only when you ask;"
+echo "   it also enables auto-heal so the bind survives the Mac sleeping. Off by default.)"
 echo
