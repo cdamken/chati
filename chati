@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.27.0"
+CHATI_VERSION="1.27.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -121,6 +121,11 @@ CHATI_SETTINGS_KEYS=(FORCE_LANG WEB_MODE THINK_MODE AGENT_MODE AGENT_AUTOACCEPT 
                      VOICE_MODE DEFAULT_VOICE SAY_SPEED SAY_COLORS \
                      USER_COLOR_NAME AI_COLOR_NAME)
 DEFAULTS_SETTINGS_FILE="${DEFAULTS_SETTINGS_FILE:-$CHATI_DATA_HOME/defaults_settings}"
+# Factory snapshot of the built-in toggle values (as initialized above), captured
+# ONCE before anything loads over them. load_active_settings resets to these
+# first, so a session with no saved settings starts clean instead of inheriting
+# the toggles of the session you were just in (#60).
+BUILTIN_SETTINGS_FILE="${STATE_DIR:-$CHATI_DATA_HOME}/builtin_settings"
 
 # Write the current toggles to a settings file (one KEY=value per line).
 settings_write() {
@@ -141,6 +146,9 @@ settings_read() {
     update_say_rate
     return 0
 }
+# Capture the factory defaults NOW, before any session/defaults file loads over
+# them, so load_active_settings can reset to a clean baseline (#60).
+settings_write "$BUILTIN_SETTINGS_FILE"
 # Save the ACTIVE session's toggles (call before switching away / at exit).
 persist_session_settings() {
     local s; s=$(cat "$PREVIOUS_FILE" 2>/dev/null)
@@ -149,9 +157,15 @@ persist_session_settings() {
 # Load the ACTIVE session's toggles; if it has none yet, fall back to the global
 # defaults (so a brand-new session inherits them). Silent if neither exists.
 load_active_settings() {
-    local s; s=$(cat "$PREVIOUS_FILE" 2>/dev/null)
-    [[ -n "$s" ]] && settings_read "$HISTORY_DIR/${s}_settings" && return 0
+    # Layered so every session starts from a known baseline (#60):
+    #   factory reset → global defaults → this session's own saved settings.
+    # Without the factory reset, a session with no saved settings would keep the
+    # PREVIOUS session's toggles (a /new or /switch would inherit them) — and a
+    # fresh session could silently start with Shell/auto-accept still armed.
+    settings_read "$BUILTIN_SETTINGS_FILE" 2>/dev/null || true
     settings_read "$DEFAULTS_SETTINGS_FILE" 2>/dev/null || true
+    local s; s=$(cat "$PREVIOUS_FILE" 2>/dev/null)
+    [[ -n "$s" ]] && settings_read "$HISTORY_DIR/${s}_settings" 2>/dev/null || true
 }
 # Clean-exit handler: flush command history AND the current session's settings.
 chati_on_exit() {

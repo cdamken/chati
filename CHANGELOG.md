@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.27.1] - 2026-08-11
+
+### Fixed
+- **Each chat truly keeps its own settings now — a new/switched session no
+  longer inherits the previous one's toggles (#60).** Per-session settings
+  (#37) saved correctly on leave, but `load_active_settings` didn't reset to a
+  baseline first, so a `/new` (or `/switch`/`/back` into a session with no saved
+  settings, and no global `/defaults`) kept the toggles from the session you
+  just left. Loading is now layered — **factory reset → global defaults → this
+  session's own settings** — captured from a one-time snapshot of the built-in
+  values at startup. A fresh session starts clean (and never silently keeps
+  Shell / auto-accept armed from a previous one); returning to a saved session
+  restores exactly its settings.
+
 ## [1.27.0] - 2026-08-11
 
 ### Changed

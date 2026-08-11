@@ -760,6 +760,15 @@ eval "$(awk '/^ansi_color\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^update_say_rate\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^settings_write\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^settings_read\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^load_active_settings\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+
+# Factory baseline used by the #60 tests below.
+_write_builtin_baseline() {
+    FORCE_LANG=auto WEB_MODE=OFF THINK_MODE=OFF AGENT_MODE=OFF AGENT_AUTOACCEPT=OFF \
+        VOICE_MODE=OFF DEFAULT_VOICE=AUTO SAY_SPEED=1.0 SAY_COLORS=white/green \
+        USER_COLOR_NAME=cyan AI_COLOR_NAME=default
+    settings_write "$BUILTIN_SETTINGS_FILE"
+}
 
 test_session_settings_roundtrip() {
     local f="$SANDBOX/A_settings"
@@ -784,6 +793,44 @@ test_settings_is_a_companion() {
     esac
 }
 run_test "_settings travels with rename/delete (companion suffix)" test_settings_is_a_companion
+
+test_new_session_resets_to_builtin() {
+    # #60: a session with NO saved settings must reset to the factory baseline,
+    # not inherit the toggles of the session we were just in (and never leave
+    # Shell/auto-accept silently armed on a fresh session).
+    BUILTIN_SETTINGS_FILE="$SANDBOX/builtin_a"
+    DEFAULTS_SETTINGS_FILE="$SANDBOX/no_defaults_a"     # absent on purpose
+    HISTORY_DIR="$SANDBOX/hist_a"; mkdir -p "$HISTORY_DIR"
+    PREVIOUS_FILE="$SANDBOX/prev_a"
+    _write_builtin_baseline
+    # previous session had turned everything ON; now land on a brand-new session
+    WEB_MODE=ON THINK_MODE=ON AGENT_MODE=ON AGENT_AUTOACCEPT=ON FORCE_LANG=es
+    echo "brand_new_session" > "$PREVIOUS_FILE"          # no _settings file for it
+    load_active_settings
+    assert_eq "$WEB_MODE" "OFF" "web reset" \
+        && assert_eq "$THINK_MODE" "OFF" "think reset" \
+        && assert_eq "$AGENT_MODE" "OFF" "shell reset (safety)" \
+        && assert_eq "$AGENT_AUTOACCEPT" "OFF" "auto-accept reset (safety)" \
+        && assert_eq "$FORCE_LANG" "auto" "lang reset"
+}
+run_test "new session resets toggles to factory baseline (#60)" test_new_session_resets_to_builtin
+
+test_returning_session_restores_own() {
+    # #60: returning to a session that HAS saved settings restores ITS values
+    # on top of the factory reset.
+    BUILTIN_SETTINGS_FILE="$SANDBOX/builtin_b"
+    DEFAULTS_SETTINGS_FILE="$SANDBOX/no_defaults_b"     # absent on purpose
+    HISTORY_DIR="$SANDBOX/hist_b"; mkdir -p "$HISTORY_DIR"
+    PREVIOUS_FILE="$SANDBOX/prev_b"
+    _write_builtin_baseline
+    echo "sessA" > "$PREVIOUS_FILE"
+    WEB_MODE=ON THINK_MODE=OFF; settings_write "$HISTORY_DIR/sessA_settings"
+    WEB_MODE=OFF THINK_MODE=ON                          # pretend we drifted away
+    load_active_settings                                 # active session is still sessA
+    assert_eq "$WEB_MODE" "ON" "restored web=ON" \
+        && assert_eq "$THINK_MODE" "OFF" "restored think=OFF"
+}
+run_test "returning to a saved session restores its settings (#60)" test_returning_session_restores_own
 
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
