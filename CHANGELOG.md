@@ -7,6 +7,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.26.0] - 2026-08-11
+
+### Added
+- **`ailocal autoheal` — self-heal Ollama's LAN/Tailscale bind after a
+  sleep/wake (#55).** After the Mac sleeps and wakes (or Ollama auto-updates in
+  the background), the daemon can keep running yet stop accepting on the real
+  interfaces while `localhost` still works, so remote clients get `connection
+  reset` / `empty reply` even though `pgrep` says Ollama is up. `ailocal
+  autoheal on` installs a LaunchAgent that probes reachability off-localhost
+  every 120s (configurable via `AUTOHEAL_INTERVAL`) and restarts Ollama when the
+  bind is wedged; launchd also fires it right after wake, so it recovers within
+  one interval. `ailocal heal` runs the check once by hand. No-op unless `ailocal
+  lan on` is set.
+
+### Changed
+- **`/model` / `/models`.** `/models` is now accepted as an alias of `/model`
+  (it used to say "Unknown command"). When the active Ollama endpoint is
+  **remote** and unreachable, the error now says the remote machine is
+  asleep/unexposed and points to `/ollama` or `/host local`, instead of the
+  misleading "start it with ailocal startollama" (which only applies locally).
+
 ## [1.25.5] - 2026-08-11
 
 ### Changed

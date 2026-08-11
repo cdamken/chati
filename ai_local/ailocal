@@ -3,7 +3,7 @@
 # Author: Carlos Damken
 set -o pipefail
 
-AILOCAL_VERSION="3.0.0"
+AILOCAL_VERSION="3.1.0"
 
 # === GLOBAL CONFIGURATION ===
 LOG_DIR="$HOME/logs"
@@ -342,6 +342,26 @@ stopollama() {
     pkill -9 -f "$OLLAMA_PROC"
     sleep 1
     echo "Ollama stopped (forced)"
+}
+
+# --- Self-heal: after sleep/wake (or an Ollama auto-update), the daemon can
+# keep running yet stop accepting on the real interfaces (LAN/Tailscale) while
+# localhost still works — so remote clients see "connection reset"/"empty reply"
+# even though `pgrep` says Ollama is up. Only an OFF-localhost probe catches it.
+# `heal` restarts Ollama when that happens. The autoheal LaunchAgent runs this on
+# a short interval; launchd also fires StartInterval jobs right after wake, so a
+# wedged bind is restored within one interval of the Mac waking. (#55)
+heal_ollama_once() {
+    local verbose=0; [[ "$1" == "-v" ]] && verbose=1
+    ensure_awake   # re-arm keep-awake if the user enabled it
+    [[ -f "$LAN_MARKER" ]] || { (( verbose )) && echo "LAN exposure off — nothing to heal."; return 0; }
+    if pgrep -f "$OLLAMA_PROC" >/dev/null && ollama_lan_reachable; then
+        (( verbose )) && echo "Ollama reachable off-localhost — OK."
+        return 0
+    fi
+    log "Ollama not reachable off-localhost (sleep/wake or upgrade?) — restarting to restore the bind."
+    stopollama >/dev/null 2>&1
+    startollama
 }
 
 searxng_installed() { [[ -x "$SEARXNG_VENV/bin/granian" && -f "$SEARXNG_SETTINGS" ]]; }
@@ -706,6 +726,12 @@ Keep-awake (stay reachable — stop the Mac idle-sleeping while it serves):
   awake off                   Restore normal sleep
   awake status                Show whether it's enabled
 
+Auto-heal (fix Ollama's LAN/Tailscale bind after a sleep/wake automatically):
+  autoheal on                 LaunchAgent: check reachability every ${AUTOHEAL_INTERVAL:-120}s, restart if wedged
+  autoheal off                Remove it
+  autoheal status             Show whether it's enabled
+  heal                        Run one check now (restarts Ollama if unreachable off-localhost)
+
 Environment:
   WEBUI_START_TIMEOUT   Seconds to wait for startup (default 180).
   AILOCAL_NO_OPEN       Set to skip opening the browser on start.
@@ -766,6 +792,65 @@ PLIST
             fi
             ;;
         *) echo "Usage: ailocal autostart on|off|status"; return 1 ;;
+    esac
+}
+
+# --- Auto-heal: a LaunchAgent that runs `ailocal heal` on a short interval, so
+# a sleep/wake (or auto-update) that wedges Ollama's LAN/Tailscale bind is fixed
+# automatically instead of needing a manual restart. Runs via a login shell so
+# PATH + any OLLAMA_HOST from your profile apply, same as autostart. (#55)
+AUTOHEAL_LABEL="com.chati.ollama-heal"
+AUTOHEAL_PLIST="$HOME/Library/LaunchAgents/$AUTOHEAL_LABEL.plist"
+AUTOHEAL_INTERVAL="${AUTOHEAL_INTERVAL:-120}"
+
+autoheal_cmd() {
+    local action="${1:-status}"
+    case "$action" in
+        on|enable)
+            mkdir -p "$(dirname "$AUTOHEAL_PLIST")" "$LOG_DIR"
+            cat > "$AUTOHEAL_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$AUTOHEAL_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lic</string>
+        <string>ailocal heal</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>StartInterval</key><integer>$AUTOHEAL_INTERVAL</integer>
+    <key>StandardOutPath</key><string>$LOG_DIR/ollama-heal.log</string>
+    <key>StandardErrorPath</key><string>$LOG_DIR/ollama-heal.log</string>
+</dict>
+</plist>
+PLIST
+            launchctl bootout "gui/$(id -u)/$AUTOHEAL_LABEL" 2>/dev/null
+            if launchctl bootstrap "gui/$(id -u)" "$AUTOHEAL_PLIST" 2>/dev/null \
+               || launchctl load "$AUTOHEAL_PLIST" 2>/dev/null; then
+                echo "Auto-heal ENABLED — every ${AUTOHEAL_INTERVAL}s it checks Ollama's LAN/Tailscale reachability and restarts it if a sleep/wake wedged the bind."
+                echo "  (plist: $AUTOHEAL_PLIST · log: $LOG_DIR/ollama-heal.log)"
+                [[ -f "$LAN_MARKER" ]] || echo "  Note: 'lan on' is OFF, so heal is a no-op until you expose Ollama (ailocal lan on)."
+            else
+                echo "Auto-heal plist written; launchctl load failed but it will run at next login."
+            fi
+            ;;
+        off|disable)
+            launchctl bootout "gui/$(id -u)/$AUTOHEAL_LABEL" 2>/dev/null \
+                || launchctl unload "$AUTOHEAL_PLIST" 2>/dev/null
+            rm -f "$AUTOHEAL_PLIST"
+            echo "Auto-heal DISABLED."
+            ;;
+        status)
+            if [[ -f "$AUTOHEAL_PLIST" ]]; then
+                echo "Auto-heal: ENABLED  (every ${AUTOHEAL_INTERVAL}s · $AUTOHEAL_PLIST)"
+            else
+                echo "Auto-heal: disabled  (enable with: ailocal autoheal on)"
+            fi
+            ;;
+        *) echo "Usage: ailocal autoheal on|off|status"; return 1 ;;
     esac
 }
 
@@ -832,6 +917,8 @@ lan_cmd() {
 case "$1" in
     status)  status ;;
     autostart) autostart_cmd "$2" ;;
+    autoheal) autoheal_cmd "$2" ;;
+    heal)    heal_ollama_once "${2:-}" ;;
     lan)     lan_cmd "$2" ;;
     awake)   awake_cmd "$2" ;;
     start)   start_target "$2" ;;
