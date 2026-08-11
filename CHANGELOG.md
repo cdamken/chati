@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.27.2] - 2026-08-11
+
+### Fixed
+- **`/lang ar` (and hi/ja/ko/zh) now reliably answers in that language.** The
+  forced-language directive injected the bare code ("Respond ONLY in ar"), which
+  small models sometimes read as a stray token and answered with one odd English
+  word ("point") instead of switching. Every supported code now maps to its full
+  English name in the directive ("Respond ONLY in Arabic"), so the instruction is
+  unambiguous. es/de/fr/pt/it/ru/en were already mapped; this adds ar, hi, ja,
+  ko, zh.
+
 ## [1.27.1] - 2026-08-11
 
 ### Fixed
