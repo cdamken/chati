@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.26.0"
+CHATI_VERSION="1.26.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -1094,6 +1094,32 @@ echo "------------------"
 # already is; just informational otherwise.
 ensure_ollama_running() {
     if ollama_running; then return 0; fi
+    # If we're pointed at a REMOTE Ollama (via /host or OLLAMA_HOST), do NOT try
+    # to start a local server: it can't serve a remote host, and with
+    # OLLAMA_HOST set to a remote address `ollama serve` can't even bind, so the
+    # readiness wait would just spin. Note it and move on — the main loop's
+    # auto-fallback drops to localhost on the first turn if that answers. (This
+    # is what made chati hang at startup when .env still pointed at an
+    # unreachable box.)
+    case "$OLLAMA_API" in
+        http://localhost:*|http://127.0.0.1:*|http://0.0.0.0:*) ;;   # local — start it below
+        *)
+            # Remote endpoint is down. Do NOT start a local server bound to a
+            # remote host (it can't bind, and the readiness wait would spin —
+            # that was the startup hang). Fall back to localhost right here if IT
+            # answers, so chats still work instead of the session being dead;
+            # the ensure_valid_model pass just below re-picks a local model.
+            echo "ℹ️  Configured Ollama ($OLLAMA_API) isn't reachable." >&2
+            if curl -fsS --max-time 3 "http://localhost:11434/api/version" >/dev/null 2>&1; then
+                export OLLAMA_API="http://localhost:11434"
+                export OLLAMA_HOST="localhost:11434"
+                echo "   ↩︎  Falling back to local Ollama (localhost:11434) for now." >&2
+                echo "      Point back at the remote with /host <name> once it's up." >&2
+                return 0
+            fi
+            echo "   No local Ollama to fall back to — switch with /host local · /ollama, or start Ollama." >&2
+            return 1 ;;
+    esac
     if ! command -v ollama >/dev/null 2>&1; then
         echo "⚠️  ollama binary not found in PATH. Install it: brew install ollama" >&2
         return 1
