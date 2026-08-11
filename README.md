@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.26.1-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.26.2-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -333,7 +333,7 @@ OLLAMA_HOST=0.0.0.0:11434 ollama serve   # or: ailocal restart
 curl -sS http://<server-ip>:11434/api/version   # verify from the server host
 ```
 
-The same wedge happens after the server Mac **sleeps and wakes**: Ollama keeps running but stops accepting on the real interfaces. Turn on the self-healer so it recovers on its own:
+The same wedge happens after the server Mac **sleeps and wakes**: Ollama keeps running but stops accepting on the real interfaces. `ailocal lan on` already turns on the self-healer for you, so an exposed server recovers on its own. To manage it directly:
 
 ```bash
 ailocal autoheal on    # probes reachability every 120s, restarts Ollama if the bind is wedged

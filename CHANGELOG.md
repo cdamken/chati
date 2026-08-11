@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.26.2] - 2026-08-11
+
+### Changed
+- **`ailocal lan on` now enables auto-heal automatically** (and `lan off`
+  disables it). Exposing Ollama on the network is exactly when the sleep/wake
+  bind-wedge bites (#55), so the self-healer that keeps remote clients from
+  losing the server after the Mac naps is now coupled to LAN exposure instead of
+  being a separate step you had to know about. `setup.sh` does **not** expose
+  Ollama by default (it has no auth); its final summary points to `ailocal lan
+  on` for those who want to serve other machines, noting it also turns on
+  auto-heal.
+
 ## [1.26.1] - 2026-08-11
 
 ### Fixed

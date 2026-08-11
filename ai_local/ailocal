@@ -3,7 +3,7 @@
 # Author: Carlos Damken
 set -o pipefail
 
-AILOCAL_VERSION="3.1.0"
+AILOCAL_VERSION="3.2.0"
 
 # === GLOBAL CONFIGURATION ===
 LOG_DIR="$HOME/logs"
@@ -717,7 +717,7 @@ Autostart (start all services automatically at login):
   autostart status            Show whether it's enabled
 
 LAN (reach the Ollama API from other computers — trusted networks only):
-  lan on                      Expose Ollama on 0.0.0.0 (launchctl setenv + persist)
+  lan on                      Expose Ollama on 0.0.0.0 (launchctl setenv + persist; also enables auto-heal)
   lan off                     Back to localhost only
   lan status                  Show current exposure and bind address
 
@@ -728,6 +728,7 @@ Keep-awake (stay reachable — stop the Mac idle-sleeping while it serves):
 
 Auto-heal (fix Ollama's LAN/Tailscale bind after a sleep/wake automatically):
   autoheal on                 LaunchAgent: check reachability every ${AUTOHEAL_INTERVAL:-120}s, restart if wedged
+                              (turned on automatically by 'lan on'; off by 'lan off')
   autoheal off                Remove it
   autoheal status             Show whether it's enabled
   heal                        Run one check now (restarts Ollama if unreachable off-localhost)
@@ -891,11 +892,18 @@ lan_cmd() {
             [[ -n "$tsi" ]] && echo "   🔒 Tailscale (raw IP):   http://$tsi:11434  (use from scripts/clients that can't resolve MagicDNS, e.g. Python urllib)"
             echo "   ⚠️  Ollama has no authentication — expose only on a trusted network,"
             echo "       or reach it over Tailscale (private, encrypted, your devices only)."
+            # Exposing on the network is exactly when the sleep/wake bind-wedge
+            # bites, so turn on the self-healer automatically (it's a no-op when
+            # LAN is off anyway). Keeps remote clients from silently losing the
+            # server after the Mac naps. (#55)
+            autoheal_cmd on >/dev/null 2>&1 \
+                && echo "   🩺 Auto-heal ON — restarts Ollama automatically if a sleep/wake wedges the bind."
             ;;
         off|disable)
             rm -f "$LAN_MARKER"
             launchctl unsetenv OLLAMA_HOST 2>/dev/null || true
             unset OLLAMA_HOST
+            autoheal_cmd off >/dev/null 2>&1   # nothing to heal once we're localhost-only
             restart_target ollama >/dev/null 2>&1
             echo "🔒 Ollama LAN exposure: OFF — localhost only."
             ;;
