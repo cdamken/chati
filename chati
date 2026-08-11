@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.27.1"
+CHATI_VERSION="1.27.2"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -621,10 +621,16 @@ USER: $m"
     fi
     if [[ "$FORCE_LANG" != "auto" ]]; then
         local lang
+        # Map EVERY supported code to its full English name — a bare code like
+        # "ar" in "Respond ONLY in ar" is ambiguous and small models sometimes
+        # answer with a stray word ("point") instead of the language. The full
+        # name ("Arabic") is unambiguous. Falls back to the raw code if unknown.
         case "$FORCE_LANG" in
             es) lang="Spanish" ;; de) lang="German" ;; fr) lang="French" ;;
             pt) lang="Portuguese" ;; it) lang="Italian" ;; ru) lang="Russian" ;;
-            en) lang="English" ;; *) lang="$FORCE_LANG" ;;
+            en) lang="English" ;; ar) lang="Arabic" ;; hi) lang="Hindi" ;;
+            ja) lang="Japanese" ;; ko) lang="Korean" ;; zh) lang="Chinese" ;;
+            *) lang="$FORCE_LANG" ;;
         esac
         m="[IMPORTANT: Respond ONLY in $lang] $m"
     fi

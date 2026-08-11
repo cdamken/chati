@@ -832,6 +832,20 @@ test_returning_session_restores_own() {
 }
 run_test "returning to a saved session restores its settings (#60)" test_returning_session_restores_own
 
+test_lang_codes_map_to_full_names() {
+    # A bare code in "Respond ONLY in ar" is ambiguous — small models sometimes
+    # answered with a stray English word instead of the language. Every
+    # non-auto supported code must map to a full name in augment_message.
+    local src c
+    src=$(awk '/# Map EVERY supported code/,/esac/' "$PROJECT_DIR/chati")
+    for c in es de fr pt it ru en ar hi ja ko zh; do
+        printf '%s' "$src" | grep -qE "$c\) lang=\"[A-Z]" \
+            || { echo "lang code '$c' not mapped to a full name" >&2; return 1; }
+    done
+    return 0
+}
+run_test "every /lang code maps to a full language name" test_lang_codes_map_to_full_names
+
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
     # The critical safety property: on ANY failure (here, a model that
