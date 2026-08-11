@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.27.0] - 2026-08-11
+
+### Changed
+- **`/host` is now the single command for Ollama endpoints.** It absorbed
+  `/ollama`: `/host` lists discovered + saved servers (localhost + Tailscale
+  peers) with versions and the current default; `/host <n|name|local>` sets the
+  default (saved to `.env`); `/host <n|name> session` switches for this run only
+  (not saved); `/host forget <n|name>` drops a saved one. A bare host still
+  defaults to `:11434`.
+
+### Removed
+- **Dropped legacy command aliases and the retired-name notices** (single-user
+  cleanup, no migration path needed): `/ollama` and `/endpoint` (use `/host`),
+  `/prompt` (use `/persona`), `/colors` (use `/color`), and `/agent` / `/a` /
+  `/aY` (use `/shell` / `/s` / `/sY`). The designed word+short-form pairs stay:
+  `/file`+`/f`, `/batch`+`/b`, `/talk`+`/t`, `/web`+`/w`, `/shell`+`/s`.
+- **Removed the old `~/chat` → `~/chati` folder migration** from `setup.sh` and
+  the README (the rename is long done; nobody runs the old path).
+
 ## [1.26.2] - 2026-08-11
 
 ### Changed

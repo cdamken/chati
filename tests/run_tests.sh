@@ -251,31 +251,30 @@ test_chati_dispatch_has_long_forms() {
         && assert_match "$dispatch" "/talk\|/t\)" "/talk|/t arm" \
         && assert_match "$dispatch" "/web\|/w\)" "/web|/w arm" \
         && assert_match "$dispatch" "/shell\|/s" "/shell|/s arm" \
-        && assert_match "$dispatch" "/ollama\|/endpoint\)" "/ollama arm" \
         && assert_match "$dispatch" "/host\)" "/host arm"
 }
 run_test "chati dispatcher accepts long and short forms" test_chati_dispatch_has_long_forms
 
 test_shell_mode_rename_retires_old_names() {
     # Shell Mode: /shell,/s,/sY are the ONLY working commands. The old /agent,
-    # /a, /aY are RETIRED (#47) — they must NOT toggle anything, just point to
-    # the new name (so a reflex /aY can't arm auto-accept).
+    # /a, /aY are GONE (#47) — no arm at all, so a reflex /aY is just an unknown
+    # command and can't arm auto-accept.
     local dispatch
     dispatch=$(sed -n '/case "\$cmd_name" in/,/esac/p' "$PROJECT_DIR/chati")
     assert_match "$dispatch" "/shell\|/s\)" "/shell|/s arm present" || return 1
     assert_match "$dispatch" "/sY\)" "/sY arm present" || return 1
-    assert_match "$dispatch" "/agent\|/a\|/aY\)" "old names have a retired-notice arm" || return 1
-    # The old names must NOT sit on the active toggle arm anymore.
-    if printf '%s' "$dispatch" | grep -qE '/shell\|/s\|/agent'; then
-        echo "/agent,/a still wired to the active Shell toggle" >&2; return 1
+    # The old names must not appear anywhere in the dispatcher — not on a toggle
+    # arm, not on a notice arm.
+    if printf '%s' "$dispatch" | grep -qE '/aY\b'; then
+        echo "/aY still referenced in the dispatcher (must be fully gone)" >&2; return 1
     fi
-    if printf '%s' "$dispatch" | grep -qE '/sY\|/aY'; then
-        echo "/aY still wired to the active auto-accept toggle" >&2; return 1
+    if printf '%s' "$dispatch" | grep -qE '/agent\b'; then
+        echo "/agent still referenced in the dispatcher (must be fully gone)" >&2; return 1
     fi
     local settings; settings=$(awk '/^show_settings\(\) \{/,/^}$/' "$PROJECT_DIR/chati")
     assert_match "$settings" "Shell:" "settings shows Shell"
 }
-run_test "Shell Mode: /agent,/a,/aY retired (do not toggle) (#47)" test_shell_mode_rename_retires_old_names
+run_test "Shell Mode: /agent,/a,/aY fully removed (do not toggle) (#47)" test_shell_mode_rename_retires_old_names
 
 if [[ "${FAST:-0}" == "1" ]]; then
     phase "FAST mode: skipping phases 2 + 3"
