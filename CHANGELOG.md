@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.28.0] - 2026-08-12
+
+### Added
+- **`./setup.sh --client [HOST]` — a thin-client install for old / low-disk
+  machines.** Installs ONLY what the chat path needs — `curl`, `jq`, `lynx` and
+  the `ollama` CLI (tens of MB) — and points chati at a **remote** Ollama. No
+  local Ollama server, no models pulled, no OpenWebUI, no SearXNG, and none of
+  the OCR stack (groovy/JVM, python, tesseract, imagemagick, ghostscript,
+  poppler). `--client heather` writes `OLLAMA_HOST=heather:11434` to `.env` and
+  checks reachability; omit HOST and set it later with `/host`. (`--minimal`
+  still installs the full Homebrew deps — it only skips the OpenWebUI/SearXNG
+  services — so `--client` is the one to use when disk is tight.)
+
 ## [1.27.2] - 2026-08-11
 
 ### Fixed

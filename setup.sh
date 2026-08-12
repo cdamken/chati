@@ -36,6 +36,8 @@ WANT_PULL=1
 REMOVE_ALL=0
 REMOVE_WEBUI=0
 REMOVE_SEARXNG=0
+CLIENT_ONLY=0                    # --client: thin install, talk to a remote Ollama
+CLIENT_HOST=""                   # optional remote host given after --client
 ASSUME_YES=0
 MODEL_EXPLICIT=0                 # set to 1 when the user forces --model
 CHAT_MODEL="$DEFAULT_CHAT_MODEL"
@@ -67,7 +69,11 @@ By default it installs EVERYTHING: Homebrew deps, Ollama + a chat model,
 the OpenWebUI browser app, and a local SearXNG for /web — all started.
 
   ./setup.sh                brew deps + Ollama + model + OpenWebUI + SearXNG
-  ./setup.sh --minimal      CLI only — skip OpenWebUI and SearXNG
+  ./setup.sh --minimal      CLI only — skip OpenWebUI and SearXNG (still installs full deps)
+  ./setup.sh --client [HOST] THIN client for old/low-disk Macs: installs only
+                             curl/jq/lynx/ollama-CLI, no local server/models/UI,
+                             and points chati at a remote Ollama (HOST optional,
+                             e.g. --client heather → heather:11434; set later with /host)
   ./setup.sh --no-webui     skip OpenWebUI only
   ./setup.sh --no-searxng   skip SearXNG only
   ./setup.sh --model NAME    force a chat model, skipping the memory-based pick
@@ -99,6 +105,9 @@ while [[ $# -gt 0 ]]; do
         --searxng)   WANT_SEARXNG=1 ;;   # accepted for compatibility (now default)
         --no-pull)   WANT_PULL=0 ;;
         --model)     CHAT_MODEL="${2:?--model needs a model name}"; MODEL_EXPLICIT=1; shift ;;
+        --client)    CLIENT_ONLY=1
+                     # Optional remote host right after --client (e.g. --client heather).
+                     if [[ -n "${2:-}" && "$2" != -* ]]; then CLIENT_HOST="$2"; shift; fi ;;
         --remove-all) REMOVE_ALL=1 ;;
         --remove-webui)   REMOVE_WEBUI=1 ;;
         --remove-searxng) REMOVE_SEARXNG=1 ;;
@@ -249,6 +258,58 @@ remove_searxng() {
     exit 0
 }
 
+# ---- Thin CLIENT install (--client): talk to a remote Ollama ----------------
+# For old / low-disk machines. Installs ONLY what the chat path needs (curl, jq,
+# lynx, and the ollama CLI for /model) and points chati at a remote Ollama. No
+# local Ollama server, no models pulled, no OpenWebUI, no SearXNG, no OCR stack
+# (groovy/python/tesseract/imagemagick/ghostscript/poppler) — so it stays tiny.
+client_install() {
+    local host="$CLIENT_HOST"
+    step "Client-only install (talk to a remote Ollama — nothing heavy runs here)"
+    brew install curl jq lynx ollama || die "Could not install client packages."
+    ok "Installed curl, jq, lynx, ollama (CLI only — no models, no local server)"
+
+    mkdir -p "$HOME/logs" "$REPO_ROOT/conversation_histories"
+    chmod +x "$REPO_ROOT/chati" "$REPO_ROOT/ai_local/ailocal" \
+             "$REPO_ROOT/ola_chat/ola" "$REPO_ROOT/ola_chat/mola" \
+             "$REPO_ROOT/ola_chat/ola_model" 2>/dev/null || true
+    local brew_bin; brew_bin="$(brew --prefix)/bin"
+    ln -sf "$REPO_ROOT/chati"            "$brew_bin/chati"   2>/dev/null
+    ln -sf "$REPO_ROOT/ai_local/ailocal" "$brew_bin/ailocal" 2>/dev/null
+    ok "Linked 'chati' onto your PATH"
+
+    # Point at the remote Ollama, persisted in .env (survives restarts).
+    local env="$REPO_ROOT/.env"
+    if [[ -n "$host" ]]; then
+        [[ "$host" != *:* ]] && host="$host:11434"     # default the port
+        local tmp; tmp="$(mktemp)"
+        if [[ -f "$env" ]]; then
+            grep -vE '^[[:space:]]*(export[[:space:]]+)?OLLAMA_HOST=' "$env" > "$tmp" 2>/dev/null || : > "$tmp"
+        else : > "$tmp"; fi
+        printf 'export OLLAMA_HOST="%s"\n' "$host" >> "$tmp"
+        ( umask 077; mv "$tmp" "$env" )
+        ok "Pointed at remote Ollama: $host (saved in .env)"
+        if curl -fsS --max-time 4 "http://$host/api/version" >/dev/null 2>&1; then
+            ok "Remote Ollama is reachable."
+        else
+            warn "Can't reach $host yet — chati will use it once it's up (or pick another with /host)."
+        fi
+    else
+        warn "No remote host given. Start chati and run:  /host <name-or-ip>   (e.g. /host heather)"
+    fi
+
+    cat <<EOF
+
+$(printf '\033[1;32m')✅ Client install complete!$(printf '\033[0m')
+────────────────────────────────────────────
+Start chatting:          chati
+Point at a server:       /host <name-or-ip>     (inside chati; saved to .env)
+List / switch servers:   /host
+This machine runs NO Ollama server, models, OpenWebUI or SearXNG — it only talks to the remote.
+EOF
+    exit 0
+}
+
 if [[ "$REMOVE_ALL"     -eq 1 ]]; then remove_all;     fi
 if [[ "$REMOVE_WEBUI"   -eq 1 ]]; then remove_webui;   fi
 if [[ "$REMOVE_SEARXNG" -eq 1 ]]; then remove_searxng; fi
@@ -274,6 +335,9 @@ elif [[ -x /usr/local/bin/brew ]]; then
 fi
 command -v brew >/dev/null 2>&1 || die "Homebrew still not on PATH. Open a new terminal and re-run ./setup.sh"
 ok "Homebrew ready ($(brew --version | head -1))"
+
+# Thin client stops here: minimal deps + remote host, none of the heavy stack.
+if [[ "$CLIENT_ONLY" -eq 1 ]]; then client_install; fi
 
 # ---- 3. Homebrew packages ----------------------------------------------------
 # Single source of truth = installer/Brewfile. No second package list to drift.
