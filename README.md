@@ -2,7 +2,7 @@
 
 An Ollama-centric, high-performance chat interface for the command line, with local AI service management and OpenWebUI integration.
 
-![version](https://img.shields.io/badge/version-1.27.2-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.28.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## ⚡ Quick Start (macOS)
 
@@ -123,7 +123,8 @@ Options (add any of these to the command above):
 
 | Option | Effect |
 |---|---|
-| `--minimal` | CLI only — skip **both** OpenWebUI and SearXNG (no Python/uv install) |
+| `--client [HOST]` | **Thin client** for old / low-disk machines: installs only `curl`, `jq`, `lynx` and the `ollama` CLI (no local server, no models, no OpenWebUI/SearXNG/OCR stack) and points chati at a remote Ollama. `--client heather` → `heather:11434`; omit HOST and set it later with `/host`. |
+| `--minimal` | CLI only — skip **both** OpenWebUI and SearXNG (still installs the full Homebrew deps) |
 | `--no-webui` | skip OpenWebUI only |
 | `--no-searxng` | skip the local SearXNG only |
 | `--model NAME` | force a chat model, skipping the memory-based pick (e.g. `--model llama3.3:70b`) |
@@ -167,6 +168,8 @@ chati
 > Force a specific model with `./setup.sh --model NAME` (e.g. `llama3.3:70b` on a high-RAM Mac). If the configured model isn't installed (e.g. after switching machines), chati **auto-falls-back** to an installed model instead of failing every message — pick any model anytime with `/model`. For a faster `/web` triage router, also pull a small model: `ollama pull llama3.2:3b`.
 >
 > **Using a remote Ollama.** On a weak laptop you can offload to a beefier machine's Ollama. Point at it with **any reachable address** (a LAN IP like `192.168.1.50:11434`, a hostname, or a Tailscale name — Tailscale is just convenient, not required): set `OLLAMA_HOST` in `.env`, or save a persistent default from inside chati with **`/host <addr>`**. **`/host`** alone lists the servers it can reach (it scans localhost + Tailscale peers) plus any you've saved, and **`/host <n|name> session`** switches just for this session. chati sends both chat and `/model`/list/pull to that box, and each box has its own installed models.
+>
+> **Old or low-disk machine?** Install chati as a **thin client** so it runs nothing heavy locally: `./setup.sh --client heather` installs only `curl`, `jq`, `lynx` and the `ollama` CLI (tens of MB, no models, no OpenWebUI/SearXNG/OCR stack) and points it at the remote. Chat needs just `bash` + `curl` + `jq`.
 
 ### 5. OpenWebUI — browser UI on top of Ollama
 
