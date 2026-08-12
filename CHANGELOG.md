@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.29.0] - 2026-08-12
+
+### Changed
+- **Two client tiers now (both use a remote Ollama, run no local server/models/
+  WebUI):**
+  - **`--client [HOST] [--searxng URL]`** is now the **full** client: chat +
+    **local OCR** (Apple Vision + tesseract/poppler/imagemagick/ghostscript/
+    groovy, so `/ocr` and `/file` on images/PDFs work) + `/web` pointed at a
+    remote SearXNG (`--searxng http://heather:8890`, saved as `SEARXNG_URLS`).
+    The AI steps of `/web` run on the remote Ollama. No local SearXNG service.
+  - **`--client-minimal [HOST]`** is the previous bare thin client: only
+    `curl`, `jq`, `lynx` and the `ollama` CLI. Chat only (no OCR, no `/web`).
+    Smallest footprint for old / low-disk machines.
+  - New `--searxng URL` flag writes `SEARXNG_URLS` to `.env` (usable with
+    `--client`). `/web` never needs a *local* SearXNG — it's a URL you point at.
+
 ## [1.28.0] - 2026-08-12
 
 ### Added
