@@ -1394,6 +1394,41 @@ test_prettify_preserves_snake_case() {
 }
 run_test "prettify leaves snake_case identifiers alone" test_prettify_preserves_snake_case
 
+# --- Compare-not-OCR routing (OCR is only for reading the exact text) --------
+# Pull the file-comparison helpers out of chati (they only need expand_path
+# from the lib we already sourced) and exercise them on real files.
+eval "$(sed -n '/^msg_wants_compare()/,/^}/p;/^files_metadata_summary()/,/^}/p;/^file_text_cheap()/,/^}/p;/^msg_is_just_paths()/,/^}/p' "$PROJECT_DIR/chati")"
+
+test_msg_wants_compare_classifies() {
+    msg_wants_compare "compara estos dos archivos" || { echo "missed 'compara'" >&2; return 1; }
+    msg_wants_compare "¿cuál es más nuevo?"        || { echo "missed 'más nuevo'" >&2; return 1; }
+    if msg_wants_compare "resume la factura"; then echo "'resume' wrongly = compare" >&2; return 1; fi
+}
+run_test "msg_wants_compare: compare/size/date yes, read no" test_msg_wants_compare_classifies
+
+test_metadata_summary_spots_duplicates() {
+    local d; d=$(mktemp -d "${TMPDIR:-/tmp}/cmp.XXXXXX")
+    printf 'same bytes\n' > "$d/a.txt"; cp "$d/a.txt" "$d/dup.txt"
+    printf 'other\n'      > "$d/b.txt"
+    local out; out=$(files_metadata_summary "$d/a.txt" "$d/dup.txt" "$d/b.txt")
+    rm -rf "$d"
+    # a.txt and dup.txt are byte-identical → same short hash appears twice.
+    local ha; ha=$(printf '%s\n' "$out" | awk '/a.txt/{print $NF}')
+    local hd; hd=$(printf '%s\n' "$out" | awk '/dup.txt/{print $NF}')
+    local hb; hb=$(printf '%s\n' "$out" | awk '/b.txt/{print $NF}')
+    [[ -n "$ha" && "$ha" == "$hd" && "$ha" != "$hb" ]] \
+        || { echo "duplicate hashes not detected: a=$ha dup=$hd b=$hb" >&2; return 1; }
+}
+run_test "files_metadata_summary flags byte-identical duplicates" test_metadata_summary_spots_duplicates
+
+test_compare_routes_before_ocr() {
+    # The auto-OCR block must check msg_wants_compare BEFORE the OCR branches,
+    # so comparing never triggers a bulk OCR.
+    grep -q 'msg_wants_compare "\$msg" && (( ${#_named_files\[@\]} >= 2 ))' "$PROJECT_DIR/chati" \
+        || { echo "compare branch missing / not first in auto-OCR block" >&2; return 1; }
+}
+run_test "auto-OCR routes compare-intent to metadata, not OCR" test_compare_routes_before_ocr
+
 #==============================================================================
 # PHASE 3 — Integration (needs Ollama)
 #==============================================================================
