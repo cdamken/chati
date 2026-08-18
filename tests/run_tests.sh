@@ -230,6 +230,25 @@ test_ola_dash_m_no_hang() {
 }
 run_test "ola -m with no value errors instead of hanging" test_ola_dash_m_no_hang
 
+test_ola_argmax_safe() {
+    # A megabyte-scale message (OCR of many files) must never travel as an
+    # argv string, or the kernel's ARG_MAX kills it with "Argument list too
+    # long" before ola runs. ola must (a) read the message from
+    # OLA_MESSAGE_FILE when none is on the command line, and (b) encode the
+    # user turn with jq --rawfile, not --arg (which would re-hit ARG_MAX).
+    grep -q 'OLA_MESSAGE_FILE' "$PROJECT_DIR/ola_chat/ola" \
+        || { echo "ola no longer reads OLA_MESSAGE_FILE" >&2; return 1; }
+    grep -q 'rawfile c' "$PROJECT_DIR/ola_chat/ola" \
+        || { echo "ola user turn must use jq --rawfile, not --arg" >&2; return 1; }
+    if grep -q -- '--arg c "\$MESSAGE"' "$PROJECT_DIR/ola_chat/ola"; then
+        echo "ola still passes MESSAGE via --arg (ARG_MAX regression)" >&2; return 1
+    fi
+    # chati must feed the message through the file, not as ola's argv.
+    grep -q 'OLA_MESSAGE_FILE=' "$PROJECT_DIR/chati" \
+        || { echo "chati send_and_capture no longer routes via OLA_MESSAGE_FILE" >&2; return 1; }
+}
+run_test "ola/chati route big messages via file, not argv (ARG_MAX)" test_ola_argmax_safe
+
 test_chati_help_documents_aliases() {
     # chati's standard: full word + short alias, both shown in help.
     local out

@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.29.0"
+CHATI_VERSION="1.29.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -381,14 +381,22 @@ send_and_capture() {
     local OLA_THINK=0
     [[ "$THINK_MODE" == "ON" ]] && OLA_THINK=1
     export OLA_THINK
+    # Pass the message through a temp file, not argv. An OCR-of-many-files
+    # message can be megabytes and blow past ARG_MAX ("Argument list too
+    # long") if handed to ola as a command-line argument. ola reads
+    # OLA_MESSAGE_FILE when no message is on its command line.
+    local _ola_msg_file; _ola_msg_file=$(mktemp 2>/dev/null)
+    export OLA_MESSAGE_FILE="$_ola_msg_file"
+    printf '%s' "$*" > "$_ola_msg_file"
     if [[ "$VOICE_MODE" == "ON" ]]; then
-        "$CHAT_CMD" "$@" >/dev/null
+        "$CHAT_CMD" >/dev/null
     else
         # Colour the streamed answer (reset always, even if it errors out).
         [[ -n "$AI_COLOR" ]] && printf '%s' "$AI_COLOR"
-        "$CHAT_CMD" "$@"
+        "$CHAT_CMD"
         [[ -n "$AI_COLOR" ]] && printf '%s' "$RESET_COLOR"
     fi
+    rm -f "$_ola_msg_file"; unset OLA_MESSAGE_FILE
     # Ctrl-C during streaming: ola was killed and the main-loop INT trap set
     # the flag. Bail before speaking/compressing a truncated reply — the loop
     # drops back to the prompt instead of exiting chati.
