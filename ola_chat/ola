@@ -49,6 +49,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# A big message (e.g. OCR of many files) as an argv string can exceed the
+# kernel's ARG_MAX and fail with "Argument list too long" before ola even
+# runs. chati routes those through a temp file instead: when no message is on
+# the command line and OLA_MESSAGE_FILE points at one, read it from there.
+if [[ -z "$MESSAGE" && -n "${OLA_MESSAGE_FILE:-}" && -f "$OLA_MESSAGE_FILE" ]]; then
+    MESSAGE=$(cat "$OLA_MESSAGE_FILE")
+fi
+
 [[ -z "$MESSAGE" ]] && { show_help; exit 1; }
 
 # Fail fast (and clearly) if Ollama isn't reachable. Catches the case
@@ -72,9 +80,17 @@ if [[ -s "$MESSAGES_FILE" ]] && [[ -n "$(tail -c1 "$MESSAGES_FILE")" ]]; then
     printf '\n' >> "$MESSAGES_FILE"
 fi
 MSG_LINES_BEFORE=$(wc -l < "$MESSAGES_FILE" 2>/dev/null | tr -d ' '); MSG_LINES_BEFORE=${MSG_LINES_BEFORE:-0}
-if ! jq -nc --arg c "$MESSAGE" '{role:"user",content:$c}' >> "$MESSAGES_FILE"; then
+# Encode the user turn via --rawfile, never --arg: a multi-megabyte message
+# (OCR of many files) as a jq command-line argument would itself hit ARG_MAX.
+# printf is a bash builtin, so writing MESSAGE to the temp file is not subject
+# to the argv size limit.
+MSG_TMP=$(mktemp) || error_exit "Could not create a temp file for the message."
+printf '%s' "$MESSAGE" > "$MSG_TMP"
+if ! jq -nc --rawfile c "$MSG_TMP" '{role:"user",content:$c}' >> "$MESSAGES_FILE"; then
+    rm -f "$MSG_TMP"
     error_exit "Could not write to $MESSAGES_FILE (session dir missing or unwritable)."
 fi
+rm -f "$MSG_TMP"
 
 # Truncate the message buffer back to before this user turn. Called on any
 # failure after the append so history stays consistent.
