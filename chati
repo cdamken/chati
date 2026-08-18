@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.29.1"
+CHATI_VERSION="1.30.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -913,6 +913,90 @@ msg_wants_ocr() {
     [[ "$m" =~ (lee|leer|leé|lé|read|abre|abrir|open|resume|resumir|resumí|summar|analiz|analyz|extrae|extraer|extract|transcrib|escanea|scan|revisa|revisar|check) ]]
 }
 
+# --- Comparison / metadata (no-OCR) path -------------------------------------
+# OCR exists for one thing: seeing the EXACT text inside a file. Comparing
+# files, finding duplicates, or checking size/date does NOT need the text —
+# reading every byte with OCR is wasteful and can build a multi-MB prompt.
+# These helpers answer those questions from metadata (size, modified time,
+# SHA-256) plus a real text diff when the files carry extractable text.
+
+# True if the message is about comparing/deduping/sizing/dating files rather
+# than reading their contents. No file noun required, so "¿cuál es más nuevo?"
+# about earlier-named files still counts.
+msg_wants_compare() {
+    local m; m=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    [[ "$m" =~ (compar|diferenci|difieren|distint|son iguales|idéntic|identic|duplicad|repetid|más nuevo|mas nuevo|más reciente|mas reciente|más viejo|mas viejo|más antigu|mas antigu|más grande|mas grande|más pesad|mas pesad|tamaño|fecha|diff|newer|older|bigger|larger|smaller|duplicate|identical) ]]
+}
+
+# Every EXISTING file path named in the message (text files too, not only
+# OCR-able ones — comparison works on any file). Same tokenizing as
+# detect_ocrable_in_msg (escaped spaces, quotes, trailing punctuation).
+detect_files_in_msg() {
+    local msg="$1" sentinel=$'\x01' tok p
+    msg="${msg//\\ /$sentinel}"
+    for tok in $msg; do
+        tok="${tok//$sentinel/ }"
+        tok="${tok#\"}"; tok="${tok%\"}"
+        tok="${tok#\'}"; tok="${tok%\'}"
+        tok="${tok%[.,;:]}"
+        p=$(expand_path "$tok")
+        if [[ -f "$p" ]]; then printf '%s\n' "$p"
+        elif [[ -d "$p" ]]; then find "$p" -maxdepth 1 -type f 2>/dev/null; fi
+    done
+}
+
+# True if the message is essentially just file path(s) with no real
+# instruction — a bare drag-and-drop. Then "read it" (OCR) is the sensible
+# default. Strips the path tokens and checks whether anything meaningful is
+# left.
+msg_is_just_paths() {
+    local msg="$1"; shift
+    local sentinel=$'\x01' tok raw t p rest="$msg"
+    local protected="${msg//\\ /$sentinel}"
+    for tok in $protected; do
+        raw="${tok//$sentinel/ }"
+        t="$raw"; t="${t#\"}"; t="${t%\"}"; t="${t#\'}"; t="${t%\'}"; t="${t%[.,;:]}"
+        p=$(expand_path "$t")
+        [[ -e "$p" ]] && rest="${rest//$raw/}"
+    done
+    rest=$(printf '%s' "$rest" | tr -d '[:space:][:punct:]')
+    [[ ${#rest} -lt 3 ]]
+}
+
+# A compact metadata table for the named files: size, modified time, and a
+# short SHA-256 (identical hashes = identical bytes = duplicates). This is the
+# comparison context handed to the model instead of full OCR text.
+files_metadata_summary() {
+    local -a files=("$@")
+    local f sz mt hash nl=$'\n' out
+    out=$'name\tbytes\tmodified\tsha256(12)'
+    for f in "${files[@]}"; do
+        [[ -f "$f" ]] || continue
+        sz=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null)
+        if [[ "$(uname -s)" == Darwin ]]; then
+            mt=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$f" 2>/dev/null)
+        else
+            mt=$(date -d "@$(stat -c %Y "$f" 2>/dev/null)" '+%Y-%m-%d %H:%M' 2>/dev/null)
+        fi
+        hash=$(shasum -a 256 "$f" 2>/dev/null | cut -c1-12)
+        out+="${nl}$(basename "$f")	${sz}	${mt}	${hash}"
+    done
+    printf '%s\n' "$out" | column -t -s $'\t' 2>/dev/null || printf '%s\n' "$out"
+}
+
+# Extract text cheaply WITHOUT OCR: a PDF's existing text layer, or a plain-text
+# file as-is. Prints nothing for images or scanned PDFs (those would need OCR,
+# which the compare path intentionally avoids).
+file_text_cheap() {
+    local f="$1" ext
+    ext=$(printf '%s' "${f##*.}" | tr '[:upper:]' '[:lower:]')
+    case "$ext" in
+        pdf) pdf_has_text_layer "$f" && pdftotext -layout "$f" - 2>/dev/null ;;
+        jpg|jpeg|png|tif|tiff|bmp|gif|heic|heif|webp|avif) : ;;   # image → needs OCR
+        *) file "$f" 2>/dev/null | grep -qi text && cat "$f" 2>/dev/null ;;
+    esac
+}
+
 # Look BACK through this session's recent user turns for an image/PDF path or
 # folder the user named earlier, and print the files from the most recent turn
 # that has any. Lets "lee los pdfs" reuse a path given a few messages ago
@@ -1630,22 +1714,53 @@ while true; do
     # /ocr needed. Only real, on-disk, OCR-able paths trigger it, so ordinary
     # prose is untouched. Disable with CHATI_AUTO_OCR=0; /ocr still works too.
     if [[ "${CHATI_AUTO_OCR:-1}" != 0 ]]; then
+        _nl=$'\n'
         _ocr_files=()
         while IFS= read -r _f; do [[ -n "$_f" ]] && _ocr_files+=("$_f"); done \
             < <(detect_ocrable_in_msg "$msg")
+        _named_files=()
+        while IFS= read -r _f; do [[ -n "$_f" ]] && _named_files+=("$_f"); done \
+            < <(detect_files_in_msg "$msg")
         _ocr_max="${CHATI_AUTO_OCR_MAX:-8}"
-        if (( ${#_ocr_files[@]} > _ocr_max )); then
+        if msg_wants_compare "$msg" && (( ${#_named_files[@]} >= 2 )); then
+            # Compare / dedupe / size / date → metadata (+ text diff), NEVER
+            # bulk OCR. OCR is only for "show me the exact text" (below).
+            echo "📊 Comparing ${#_named_files[@]} files by size/date/hash — no OCR."
+            _cmp="[File comparison — metadata]:${_nl}$(files_metadata_summary "${_named_files[@]}")"
+            if (( ${#_named_files[@]} == 2 )); then
+                _t1=$(file_text_cheap "${_named_files[0]}")
+                _t2=$(file_text_cheap "${_named_files[1]}")
+                if [[ -n "$_t1" && -n "$_t2" ]]; then
+                    _d=$(diff <(printf '%s' "$_t1") <(printf '%s' "$_t2"))
+                    if [[ -n "$_d" ]]; then
+                        _cmp+="${_nl}${_nl}[Text diff ($(basename "${_named_files[0]}") vs $(basename "${_named_files[1]}"))]:${_nl}${_d}"
+                    else
+                        _cmp+="${_nl}${_nl}[The extracted text is identical between the two files.]"
+                    fi
+                elif (( ${#_ocr_files[@]} )); then
+                    _cmp+="${_nl}${_nl}[These are images/scanned PDFs, compared by size/date/hash only. To compare their TEXT, say \"lee y compara\" so I run OCR.]"
+                fi
+            fi
+            msg="${msg}${_nl}${_nl}${_cmp}"
+        elif (( ${#_ocr_files[@]} > _ocr_max )); then
             # docr is slow (~a minute per file); don't silently OCR a huge
             # folder. Tell the user to opt in explicitly.
             echo "📎 Found ${#_ocr_files[@]} image/PDF files — too many to OCR automatically."
             echo "   Run  /ocr <file|folder|glob>  to read them all, or name specific files."
-        elif (( ${#_ocr_files[@]} )); then
+        elif (( ${#_ocr_files[@]} )) && { msg_wants_ocr "$msg" || msg_is_just_paths "$msg" "${_ocr_files[@]}"; }; then
+            # OCR only when you actually want the text: a read/analyze verb, or
+            # a bare file drop (nothing but the path).
             echo "📎 Detected ${#_ocr_files[@]} image/PDF file(s) — reading with docr…"
             _ocr_text=$(ocr_files_to_text "${_ocr_files[@]}")
             if [[ -n "$_ocr_text" ]]; then
-                _nl=$'\n'
                 msg="${msg}${_nl}${_nl}[Text extracted from the attached file(s) via OCR — use it to answer]:${_ocr_text}"
             fi
+        elif (( ${#_ocr_files[@]} )); then
+            # Files named, but no read/compare intent — don't force OCR. Show
+            # what they are and offer the explicit ways in.
+            echo "📎 ${#_ocr_files[@]} image/PDF file(s) named — not OCR'd (OCR is only when you need the exact text)."
+            echo "   • /ocr <file>  reads the text   • ask to \"compare\" for size/date/duplicates"
+            msg="${msg}${_nl}${_nl}[Files named (not read):${_nl}$(files_metadata_summary "${_ocr_files[@]}")]"
         elif msg_wants_ocr "$msg"; then
             # No path in THIS message, but you asked to read a document. First
             # reuse a path/folder you named earlier in this session, so you
