@@ -865,6 +865,17 @@ test_lang_codes_map_to_full_names() {
 }
 run_test "every /lang code maps to a full language name" test_lang_codes_map_to_full_names
 
+eval "$(grep -E '^version_gt\(\) \{' "$PROJECT_DIR/chati")"
+test_version_gt() {
+    # Self-update comparison: B strictly newer than A. Must handle the 9→10 case.
+    version_gt 1.29.0 1.30.0 || { echo "1.30.0 > 1.29.0 expected" >&2; return 1; }
+    version_gt 1.9.0  1.10.0 || { echo "1.10.0 > 1.9.0 expected (numeric, not lexical)" >&2; return 1; }
+    version_gt 1.30.0 1.30.0 && { echo "equal versions must not compare greater" >&2; return 1; }
+    version_gt 1.30.0 1.29.1 && { echo "older must not compare greater" >&2; return 1; }
+    return 0
+}
+run_test "version_gt compares versions numerically (self-update)" test_version_gt
+
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
     # The critical safety property: on ANY failure (here, a model that

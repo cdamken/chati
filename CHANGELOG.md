@@ -7,6 +7,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.31.0] - 2026-09-02
+
+### Added
+- **Self-update: `chati --update` and `chati --check-update`, plus a once-a-day
+  startup notice.** All bash + curl + (jq or grep). `--check-update` compares
+  your version to GitHub's latest **release** and prints whether a newer one
+  exists; `--update` updates the checkout with `git pull --ff-only` (refuses if
+  you have local changes, and prints the tarball URL when it isn't a git
+  checkout). At startup chati checks at most once per day (short timeout, cached
+  under `STATE_DIR`) and, if a newer release is out, prints one line pointing to
+  `chati --update`. Opt out with `CHATI_NO_UPDATE_CHECK=1`; target a fork with
+  `CHATI_REPO=owner/name`. Version compare is numeric (`1.9.0` < `1.10.0`).
+
+## [1.30.0] - 2026-09-02
+
+### Changed
+- **Don't force OCR — route a file request by intent (#66).** Auto-OCR used to
+  fire whenever you named image/PDF files and OCR'd them regardless of intent
+  (slow, and big PDFs built multi-MB prompts). Now: compare / dedupe / size /
+  date gives a metadata table (size, modified, SHA-256) plus a real text diff
+  when files carry extractable text (no OCR; identical SHA-256 = duplicate);
+  read / analyze / extract or a bare file drop still OCRs; a file named with no
+  read/compare intent shows its metadata and offers `/ocr` instead of silently
+  OCR-ing.
+
+## [1.29.1] - 2026-09-02
+
+### Fixed
+- **A big OCR message no longer hits `ARG_MAX` (#65).** OCR-ing many files builds
+  one message that can be several MB; passed to `ola` as an argv it exceeded
+  macOS's 1 MB `ARG_MAX` and died with "Argument list too long". chati now writes
+  the message to a temp file (`OLA_MESSAGE_FILE`) and `ola` reads it, encoding the
+  turn with `jq --rawfile` instead of `--arg`.
+
 ## [1.29.0] - 2026-08-12
 
 ### Changed
