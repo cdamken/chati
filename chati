@@ -19,16 +19,81 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.30.0"
+CHATI_VERSION="1.31.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
+
+# --- Self-update: check GitHub's latest RELEASE, update via git pull ---------
+# All bash + curl + (jq or grep). Opt out of the startup check with
+# CHATI_NO_UPDATE_CHECK=1; point at a fork with CHATI_REPO=owner/name.
+CHATI_REPO="${CHATI_REPO:-cdamken/chati}"
+
+# Latest release tag from GitHub, without the leading "v". Empty on any failure.
+chati_latest_version() {
+    local api="https://api.github.com/repos/$CHATI_REPO/releases/latest" tag
+    if command -v jq >/dev/null 2>&1; then
+        tag=$(curl -fsS --max-time "${CHATI_UPDATE_TIMEOUT:-4}" "$api" 2>/dev/null | jq -r '.tag_name // empty' 2>/dev/null)
+    else
+        tag=$(curl -fsS --max-time "${CHATI_UPDATE_TIMEOUT:-4}" "$api" 2>/dev/null \
+              | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/')
+    fi
+    [[ -z "$tag" ]] && return 1
+    printf '%s' "${tag#v}"
+}
+
+# version_gt A B  → true (0) when B is strictly newer than A (semver via sort -V).
+version_gt() { [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" == "$2" ]]; }
+
+# Update the checkout to the latest. git pull for a checkout; tarball hint else.
+chati_self_update() {
+    local latest cur="$CHATI_VERSION"
+    latest=$(chati_latest_version) || { echo "chati: couldn't reach GitHub to check for updates." >&2; return 1; }
+    if ! version_gt "$cur" "$latest"; then
+        echo "✅ chati is up to date ($cur; latest release v$latest)."; return 0
+    fi
+    echo "⬆️  Updating chati $cur → $latest…"
+    if ! git -C "$CHATI_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "chati: $CHATI_DIR isn't a git checkout — download the release:" >&2
+        echo "   https://github.com/$CHATI_REPO/archive/refs/tags/v$latest.tar.gz" >&2
+        return 1
+    fi
+    if [[ -n "$(git -C "$CHATI_DIR" status --porcelain 2>/dev/null)" ]]; then
+        echo "chati: local changes in $CHATI_DIR — commit or stash them first, or force:" >&2
+        echo "   git -C \"$CHATI_DIR\" fetch origin && git -C \"$CHATI_DIR\" reset --hard origin/main" >&2
+        return 1
+    fi
+    if git -C "$CHATI_DIR" pull --ff-only >/dev/null 2>&1; then
+        echo "✅ Updated to chati $(cat "$CHATI_DIR/VERSION" 2>/dev/null || echo "$latest"). Restart chati to use it."
+    else
+        echo "chati: git pull failed. Try:  git -C \"$CHATI_DIR\" fetch origin && git -C \"$CHATI_DIR\" reset --hard origin/main" >&2
+        return 1
+    fi
+}
+
+# One-line startup notice if a newer release exists. Throttled to once a day
+# (a timestamp under STATE_DIR), short timeout, never blocks or errors out.
+check_for_update_quiet() {
+    [[ -n "${CHATI_NO_UPDATE_CHECK:-}" ]] && return 0
+    command -v curl >/dev/null 2>&1 || return 0
+    local f="$STATE_DIR/.last_update_check" now last
+    now=$(date +%s 2>/dev/null || echo 0); last=$(cat "$f" 2>/dev/null || echo 0)
+    (( now - last < ${CHATI_UPDATE_INTERVAL:-86400} )) && return 0
+    printf '%s' "$now" > "$f" 2>/dev/null || true
+    local latest; latest=$(chati_latest_version) || return 0
+    version_gt "$CHATI_VERSION" "$latest" \
+        && echo "🆕 chati v$latest is available (you have $CHATI_VERSION). Update:  chati --update"
+    return 0
+}
 
 # Parse CLI flags up-front so `chati --help`, `chati --version` and the
 # headless `chati search` subcommand work without entering the REPL.
 case "${1:-}" in
     -h|--help)
-        echo "Usage: chati [-h|--help] [-v|--version] [search <query...>]"
+        echo "Usage: chati [-h|--help] [-v|--version] [--check-update] [--update] [search <query...>]"
         echo "Interactive Ollama chat. Type /h once inside for command list."
+        echo ""
+        echo "  --check-update      Check GitHub for a newer release (prints, no changes)."
+        echo "  --update            Update this checkout to the latest release (git pull)."
         echo ""
         echo "  search <query...>   Headless web search via the SearXNG backend:"
         echo "                      prints results and exits (no REPL). For scripts,"
@@ -37,6 +102,16 @@ case "${1:-}" in
         exit 0 ;;
     -v|--version)
         show_version; exit 0 ;;
+    --update|--upgrade)
+        chati_self_update; exit $? ;;
+    --check-update|--check)
+        _lv=$(chati_latest_version) || { echo "chati: couldn't reach GitHub to check." >&2; exit 1; }
+        if version_gt "$CHATI_VERSION" "$_lv"; then
+            echo "🆕 chati v$_lv is available (you have $CHATI_VERSION). Update:  chati --update"
+        else
+            echo "✅ chati is up to date ($CHATI_VERSION; latest release v$_lv)."
+        fi
+        exit 0 ;;
     search|--search)
         # Headless one-shot web search. Reuses lib_web.sh's web_search (sourced
         # via lib_chat.sh above), so it hits the exact same SearXNG endpoints and
@@ -1200,6 +1275,7 @@ edit_prompt_in_editor() {
 
 show_version
 echo "------------------"
+check_for_update_quiet   # once/day: one-line notice if a newer release exists
 
 # Auto-start Ollama on launch if it's not already running. Silent if it
 # already is; just informational otherwise.
