@@ -125,27 +125,30 @@ webui_installed_version() {
 # to a timestamped backup (never deleting), so `ailocal restore` and the backup
 # folder both keep the old data.
 
-# Count user accounts in a webui DB (0 if missing/unreadable). Uses python3's
-# stdlib sqlite3 in read-only mode, so it needs no system `sqlite3` binary and
-# is safe while the server is running.
-webui_db_user_count() {
+# Count OpenWebUI accounts stuck in "pending" activation (0 if missing/
+# unreadable). This is the exact symptom of the auth login wall (#70). It is a
+# false-positive-free signal: a login-less DB always has exactly one auto-created
+# ADMIN user and never a "pending" one, so counting pending accounts never
+# touches a healthy login-less install. Uses python3's stdlib sqlite3 in
+# read-only mode (no system `sqlite3` binary needed; safe while the server runs).
+webui_db_pending_count() {
     local db="$1"
     [[ -f "$db" ]] || { echo 0; return; }
     python3 - "$db" <<'PY' 2>/dev/null || echo 0
 import sqlite3, sys
 try:
     con = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
-    print(con.execute("SELECT COUNT(*) FROM user").fetchone()[0])
+    print(con.execute("SELECT COUNT(*) FROM user WHERE role='pending'").fetchone()[0])
 except Exception:
     print(0)
 PY
 }
 
-# Does the current OpenWebUI DB have a login wall (any accounts)?
-webui_db_has_accounts() {
+# Is the current OpenWebUI DB stuck behind a sign-in / pending-activation wall?
+webui_db_has_loginwall() {
     local db; db=$(find_webui_db)
     [[ -n "$db" ]] || return 1
-    [[ "$(webui_db_user_count "$db")" -gt 0 ]]
+    [[ "$(webui_db_pending_count "$db")" -gt 0 ]]
 }
 
 # Did the user explicitly ask for auth? Then we never touch their DB.
@@ -169,8 +172,8 @@ reset_webui_loginless() {
         log "WEBUI_AUTH is set on — keeping your multi-user auth DB untouched."
         return 0
     fi
-    if ! webui_db_has_accounts; then
-        log "OpenWebUI is already login-less (no accounts) — nothing to reset."
+    if ! webui_db_has_loginwall; then
+        log "OpenWebUI has no pending accounts — already login-less, nothing to reset."
         return 0
     fi
     stopwebui >/dev/null 2>&1 || true
@@ -709,14 +712,6 @@ upgrade_webui() {
     # if the result is broken you run `ailocal restore`.
     if [[ -n "$(find_webui_db)" ]]; then
         create_backup
-        # #70: a DB with accounts shows a sign-in / "pending activation" wall
-        # forever. Unless the user explicitly asked for auth (WEBUI_AUTH), return
-        # it to chati's login-less default so the update actually clears the old
-        # sign-in state. Non-destructive: the DB moves to a timestamped backup and
-        # create_backup already snapshotted the pre-upgrade state.
-        if webui_db_has_accounts && ! webui_auth_requested; then
-            reset_webui_loginless "upgrade"
-        fi
     fi
 
     log "Starting OpenWebUI upgrade (installed: ${before:-none}, force: ${force:---no})..."
@@ -793,8 +788,6 @@ Services (TARGET: ollama | webui | searxng | all — default all):
 Upgrades (every webui upgrade snapshots the current state first):
   upgrade webui [--force]     Upgrade; shows version before → after.
                               --force reinstalls the venv from scratch.
-                              A DB stuck behind a sign-in wall is returned to
-                              login-less here (skipped if WEBUI_AUTH is set).
   upgrade ollama              Upgrade app + refresh all models
   upgrade all [--force]       Both
 
@@ -1043,7 +1036,7 @@ case "$1" in
     stopall|stop-all)   stop_target all ;;
     startsearxng)       startsearxng ;;
     stopsearxng)        stopsearxng ;;
-    __webui-accounts)   webui_db_user_count "$2" ;;   # internal: test hook for #70
+    __webui-pending)    webui_db_pending_count "$2" ;;   # internal: test hook for #70
     safe-upgrade)       upgrade_webui "$2" ;;   # backup-first is built in now
     restore-backup)     restore_backup "$2" ;;
 

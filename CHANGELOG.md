@@ -14,12 +14,13 @@ carries its own internal version (shown by `chati --version`).
   Activation Pending" wall (#70).** chati runs OpenWebUI login-less by default,
   but that only applied to a fresh DB: once a DB had accounts, OpenWebUI kept
   auth on forever and any new signup landed in `pending`. `ailocal` now detects
-  an account-bearing DB and returns it to the login-less default, both
-  automatically during `upgrade webui` and on demand via a new `ailocal reset
-  webui`. It is skipped when you explicitly set `WEBUI_AUTH` (real multi-user
-  setups are left alone), and it is non-destructive: the old DB is moved to a
-  timestamped `login-reset-backup-*` folder and the pre-upgrade snapshot from
-  `ailocal restore` still applies. The SearXNG web-search wiring is unchanged and
+  an account-bearing DB and returns it to the login-less default. `setup.sh`
+  runs this on the webui path, so the normal update flow (`chati --update` to
+  pull new code, then re-run `setup.sh`) clears the stale sign-in state; the same
+  reset is available on demand via a new `ailocal reset webui`. It is skipped
+  when you explicitly set `WEBUI_AUTH` (real multi-user setups are left alone),
+  and it is non-destructive: the old DB is moved to a timestamped
+  `login-reset-backup-*` folder. The SearXNG web-search wiring is unchanged and
   applies to the fresh login-less DB as before.
 
 ## [1.31.0] - 2026-09-02

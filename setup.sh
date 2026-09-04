@@ -561,6 +561,13 @@ fi
 # migrates its DB and can be slow, so a timeout must not abort setup.
 WEBUI_STARTED=0
 if [[ "$WANT_WEBUI" -eq 1 ]]; then
+    # #70: after `chati --update` pulls new code, re-running setup is what applies
+    # it. If a previous DB is stuck behind a sign-in / "pending activation" wall,
+    # return it to chati's login-less default here so the update actually clears
+    # that state. No-op on a fresh or already-login-less install; skipped if the
+    # user set WEBUI_AUTH (real multi-user setups are left alone). Non-destructive:
+    # the old DB moves to a timestamped backup.
+    "$REPO_ROOT/ai_local/ailocal" reset webui
     step "Installing OpenWebUI (browser UI)"
     "$REPO_ROOT/ai_local/ailocal" upgrade webui --force
     ok "OpenWebUI installed"

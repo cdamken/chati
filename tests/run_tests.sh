@@ -201,24 +201,28 @@ test_ailocal_searxng_documented() {
 run_test "ailocal exposes the searxng target" test_ailocal_searxng_documented
 
 test_webui_loginless_reset() {
-    # #70: a DB with accounts is a sign-in/pending wall. ailocal must detect it
-    # (via the internal count hook) and expose the login-less reset verb.
+    # #70: the login wall shows as accounts in role 'pending'. A login-less DB has
+    # only an auto-created admin (0 pending), so detection keys on pending count —
+    # never a false positive on a healthy login-less install.
     local tmp; tmp=$(mktemp -d)
-    python3 - "$tmp/with.db" <<'PY'
+    # login wall: an auto admin plus a real signup stuck pending
+    python3 - "$tmp/wall.db" <<'PY'
 import sqlite3,sys
 c=sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE user(id TEXT, role TEXT)")
 c.executemany("INSERT INTO user VALUES(?,?)",[("a","admin"),("b","pending")]); c.commit()
 PY
-    python3 - "$tmp/empty.db" <<'PY'
+    # login-less: exactly the auto admin, no pending
+    python3 - "$tmp/loginless.db" <<'PY'
 import sqlite3,sys
-c=sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE user(id TEXT, role TEXT)"); c.commit()
+c=sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE user(id TEXT, role TEXT)")
+c.execute("INSERT INTO user VALUES('a','admin')"); c.commit()
 PY
     local n
-    n=$(./ai_local/ailocal __webui-accounts "$tmp/with.db")
-    [[ "$n" == "2" ]] || { echo "expected 2 accounts, got '$n'" >&2; rm -rf "$tmp"; return 1; }
-    n=$(./ai_local/ailocal __webui-accounts "$tmp/empty.db")
-    [[ "$n" == "0" ]] || { echo "empty user table should be 0, got '$n'" >&2; rm -rf "$tmp"; return 1; }
-    n=$(./ai_local/ailocal __webui-accounts "$tmp/missing.db")
+    n=$(./ai_local/ailocal __webui-pending "$tmp/wall.db")
+    [[ "$n" == "1" ]] || { echo "login wall should report 1 pending, got '$n'" >&2; rm -rf "$tmp"; return 1; }
+    n=$(./ai_local/ailocal __webui-pending "$tmp/loginless.db")
+    [[ "$n" == "0" ]] || { echo "login-less (admin only) should be 0 pending, got '$n'" >&2; rm -rf "$tmp"; return 1; }
+    n=$(./ai_local/ailocal __webui-pending "$tmp/missing.db")
     [[ "$n" == "0" ]] || { echo "missing db should be 0, got '$n'" >&2; rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
     # The reset verb is documented and rejects a bad target.
