@@ -3,7 +3,7 @@
 # Author: Carlos Damken
 set -o pipefail
 
-AILOCAL_VERSION="3.2.0"
+AILOCAL_VERSION="3.3.0"
 
 # === GLOBAL CONFIGURATION ===
 LOG_DIR="$HOME/logs"
@@ -115,6 +115,87 @@ find_webui_db() {
 webui_installed_version() {
     "$OPENWEBUI_VENV/bin/python3" -c \
         'import importlib.metadata as m; print(m.version("open-webui"))' 2>/dev/null
+}
+
+# --- Login-less recovery (#70) ------------------------------------------------
+# chati runs OpenWebUI login-less by default, but that only applies to a FRESH
+# DB. Once a DB has accounts it shows a sign-in / "Account Activation Pending"
+# wall forever, and OpenWebUI refuses to turn auth back off on an existing DB.
+# These helpers detect that state and return the DB to login-less by MOVING it
+# to a timestamped backup (never deleting), so `ailocal restore` and the backup
+# folder both keep the old data.
+
+# Count user accounts in a webui DB (0 if missing/unreadable). Uses python3's
+# stdlib sqlite3 in read-only mode, so it needs no system `sqlite3` binary and
+# is safe while the server is running.
+webui_db_user_count() {
+    local db="$1"
+    [[ -f "$db" ]] || { echo 0; return; }
+    python3 - "$db" <<'PY' 2>/dev/null || echo 0
+import sqlite3, sys
+try:
+    con = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+    print(con.execute("SELECT COUNT(*) FROM user").fetchone()[0])
+except Exception:
+    print(0)
+PY
+}
+
+# Does the current OpenWebUI DB have a login wall (any accounts)?
+webui_db_has_accounts() {
+    local db; db=$(find_webui_db)
+    [[ -n "$db" ]] || return 1
+    [[ "$(webui_db_user_count "$db")" -gt 0 ]]
+}
+
+# Did the user explicitly ask for auth? Then we never touch their DB.
+webui_auth_requested() {
+    case "${WEBUI_AUTH:-}" in
+        True|true|1|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Return OpenWebUI to the login-less default by moving the account-bearing DB
+# aside. Non-destructive and idempotent. $1 is a short reason for the log.
+reset_webui_loginless() {
+    local reason="${1:-manual}"
+    local db; db=$(find_webui_db)
+    if [[ -z "$db" ]]; then
+        log "No OpenWebUI database yet — nothing to reset; the next start is login-less."
+        return 0
+    fi
+    if webui_auth_requested; then
+        log "WEBUI_AUTH is set on — keeping your multi-user auth DB untouched."
+        return 0
+    fi
+    if ! webui_db_has_accounts; then
+        log "OpenWebUI is already login-less (no accounts) — nothing to reset."
+        return 0
+    fi
+    stopwebui >/dev/null 2>&1 || true
+    local stamp bak_dir f moved=0
+    stamp=$(date +%Y%m%d-%H%M%S)
+    bak_dir="$OPENWEBUI_DATA_DIR/login-reset-backup-$stamp"
+    mkdir -p "$bak_dir"
+    for f in webui.db webui.db-wal webui.db-shm; do
+        [[ -e "$OPENWEBUI_DATA_DIR/$f" ]] && { mv "$OPENWEBUI_DATA_DIR/$f" "$bak_dir/$f"; moved=1; }
+    done
+    # Older layouts kept the DB inside the venv — move that one too.
+    if [[ "$db" != "$OPENWEBUI_DATA_DIR/webui.db" && -e "$db" ]]; then
+        mv "$db" "$bak_dir/webui.db"; moved=1
+    fi
+    if [[ "$moved" -eq 1 ]]; then
+        log "OpenWebUI reset to login-less ($reason). Old DB saved at: $bak_dir"
+        log "Next 'ailocal start webui' opens straight to chat. To get the old accounts back, move that DB back or run 'ailocal restore'."
+    fi
+}
+
+reset_target() {
+    case "${1:-}" in
+        webui) reset_webui_loginless "manual" ;;
+        *) error_exit "Unknown reset target: ${1:-<none>} (expected: webui)" ;;
+    esac
 }
 
 # === SERVICE MANAGEMENT ===
@@ -628,6 +709,14 @@ upgrade_webui() {
     # if the result is broken you run `ailocal restore`.
     if [[ -n "$(find_webui_db)" ]]; then
         create_backup
+        # #70: a DB with accounts shows a sign-in / "pending activation" wall
+        # forever. Unless the user explicitly asked for auth (WEBUI_AUTH), return
+        # it to chati's login-less default so the update actually clears the old
+        # sign-in state. Non-destructive: the DB moves to a timestamped backup and
+        # create_backup already snapshotted the pre-upgrade state.
+        if webui_db_has_accounts && ! webui_auth_requested; then
+            reset_webui_loginless "upgrade"
+        fi
     fi
 
     log "Starting OpenWebUI upgrade (installed: ${before:-none}, force: ${force:---no})..."
@@ -704,8 +793,16 @@ Services (TARGET: ollama | webui | searxng | all — default all):
 Upgrades (every webui upgrade snapshots the current state first):
   upgrade webui [--force]     Upgrade; shows version before → after.
                               --force reinstalls the venv from scratch.
+                              A DB stuck behind a sign-in wall is returned to
+                              login-less here (skipped if WEBUI_AUTH is set).
   upgrade ollama              Upgrade app + refresh all models
   upgrade all [--force]       Both
+
+Reset (return OpenWebUI to chati's login-less default):
+  reset webui                 Back up the current DB and clear the sign-in /
+                              "pending activation" wall so the next start opens
+                              straight to chat. Skipped if WEBUI_AUTH is set.
+                              Non-destructive: old DB is saved and 'restore' works.
 
 Backup (ONE slot — the state before the last upgrade/backup):
   backup                      Snapshot now, replacing the previous one
@@ -933,6 +1030,7 @@ case "$1" in
     stop)    stop_target "$2" ;;
     restart) restart_target "$2" ;;
     upgrade) upgrade_target "$2" "$3" ;;
+    reset)   reset_target "$2" ;;
     backup)  create_backup ;;
     restore) restore_backup "$2" ;;
 
@@ -945,6 +1043,7 @@ case "$1" in
     stopall|stop-all)   stop_target all ;;
     startsearxng)       startsearxng ;;
     stopsearxng)        stopsearxng ;;
+    __webui-accounts)   webui_db_user_count "$2" ;;   # internal: test hook for #70
     safe-upgrade)       upgrade_webui "$2" ;;   # backup-first is built in now
     restore-backup)     restore_backup "$2" ;;
 

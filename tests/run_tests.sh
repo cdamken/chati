@@ -200,6 +200,36 @@ test_ailocal_searxng_documented() {
 }
 run_test "ailocal exposes the searxng target" test_ailocal_searxng_documented
 
+test_webui_loginless_reset() {
+    # #70: a DB with accounts is a sign-in/pending wall. ailocal must detect it
+    # (via the internal count hook) and expose the login-less reset verb.
+    local tmp; tmp=$(mktemp -d)
+    python3 - "$tmp/with.db" <<'PY'
+import sqlite3,sys
+c=sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE user(id TEXT, role TEXT)")
+c.executemany("INSERT INTO user VALUES(?,?)",[("a","admin"),("b","pending")]); c.commit()
+PY
+    python3 - "$tmp/empty.db" <<'PY'
+import sqlite3,sys
+c=sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE user(id TEXT, role TEXT)"); c.commit()
+PY
+    local n
+    n=$(./ai_local/ailocal __webui-accounts "$tmp/with.db")
+    [[ "$n" == "2" ]] || { echo "expected 2 accounts, got '$n'" >&2; rm -rf "$tmp"; return 1; }
+    n=$(./ai_local/ailocal __webui-accounts "$tmp/empty.db")
+    [[ "$n" == "0" ]] || { echo "empty user table should be 0, got '$n'" >&2; rm -rf "$tmp"; return 1; }
+    n=$(./ai_local/ailocal __webui-accounts "$tmp/missing.db")
+    [[ "$n" == "0" ]] || { echo "missing db should be 0, got '$n'" >&2; rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+    # The reset verb is documented and rejects a bad target.
+    local out; out=$(./ai_local/ailocal --help 2>&1) || return 1
+    assert_match "$out" "reset webui" "reset webui in help" || return 1
+    if ./ai_local/ailocal reset bogus >/dev/null 2>&1; then
+        echo "reset bogus should fail" >&2; return 1
+    fi
+}
+run_test "ailocal returns OpenWebUI to login-less (#70)" test_webui_loginless_reset
+
 test_ollama_proc_pattern() {
     # The process-match pattern must catch ollama at a path/word boundary
     # but NOT a lookalike like "myollama serve". Eval the real value from
