@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.31.1] - 2026-09-15
+
+### Fixed
+- **`/new` and `/switch` now announce when Shell/auto-accept is turned OFF.**
+  Each session keeps its own settings (#60), so starting or switching sessions
+  resets Shell mode and auto-accept to that session's baseline — a deliberate
+  safety default so a fresh session never inherits an armed `/sY` from the
+  previous chat. But the reset was **silent**: after `/sY` then `/new`, users
+  believed shell mode was still on, and their next request was answered by a
+  plain chat model that (correctly) said it had no disk access. The session
+  change now prints `🐚 Shell mode is OFF in this session (/s to enable)` (or the
+  auto-accept equivalent) so the state is never a surprise.
+
 ## [1.31.0] - 2026-09-02
 
 ### Added
