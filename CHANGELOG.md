@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.31.4] - 2026-09-15
+
+### Changed
+- **`chati --version` now matches the repo/release version again.** The CLI's
+  internal `CHATI_VERSION` had lagged behind the project `VERSION` (a release that
+  only touched `setup.sh` left the binary unchanged), so `chati --version` printed
+  an older number than the installed release. Across a fleet of machines that made
+  it hard to tell which version each box was really on. Both numbers are bumped
+  together here and kept in lockstep from now on.
+
 ## [1.31.3] - 2026-09-15
 
 ### Added
