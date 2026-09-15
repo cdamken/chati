@@ -7,6 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.32.0] - 2026-09-15
+
+### Changed
+- **`chati --update` now applies the code it pulls.** It used to `git pull` and
+  stop, so any change that needed setup (config, wiring, service tweaks) never
+  landed until the user remembered to re-run `setup.sh` by hand — the gap behind
+  "I updated but nothing changed". After a pull that actually moves HEAD, it now
+  runs `setup.sh --update` to apply the change; if the pull brought nothing new
+  it says so instead of claiming an update. A thin-client install (remote Ollama)
+  is detected and skips the server-side setup, since the pull is all it needs.
+- **`setup.sh --update`: re-apply respecting the installed profile.** A new mode
+  that re-applies config/wiring and updates only the components already present
+  (OpenWebUI/SearXNG touched only if installed), so a re-apply never turns a
+  `--minimal` or `--client` box into a full one. The initial install is unchanged.
+- **`setup.sh` no longer force-reinstalls OpenWebUI on every run.** The webui step
+  was `ailocal upgrade webui --force`, which wiped and rebuilt the venv every time
+  and made re-running setup slow. It now uses `ailocal upgrade webui` (a fast
+  no-op when PyPI has nothing newer); `--force` is opt-in via `setup.sh
+  --force-webui`. This is what makes the new `chati --update` → apply flow cheap.
+
 ## [1.31.4] - 2026-09-15
 
 ### Changed

@@ -200,6 +200,27 @@ test_ailocal_searxng_documented() {
 }
 run_test "ailocal exposes the searxng target" test_ailocal_searxng_documented
 
+test_update_applies_setup() {
+    # chati --update must APPLY what it pulls (run setup --update), not just pull.
+    grep -q 'setup.sh" --update' "$PROJECT_DIR/chati" \
+        || { echo "chati --update should run 'setup.sh --update' after a pull" >&2; return 1; }
+    # setup --update re-applies respecting the installed profile (derives webui/
+    # searxng from what's on disk, never forcing a full profile onto a client box).
+    grep -qE 'UPDATE_MODE=1' "$PROJECT_DIR/setup.sh" \
+        && grep -q 'HOME/openwebui' "$PROJECT_DIR/setup.sh" \
+        || { echo "setup.sh --update must derive the profile from what's installed" >&2; return 1; }
+    # --help documents both new flags.
+    local out; out=$(./setup.sh --help 2>&1) || return 1
+    assert_match "$out" "update.*respecting" "setup --update in help" \
+        && assert_match "$out" "force-webui" "setup --force-webui in help" || return 1
+    # The webui step is idempotent by default: the --force is gated behind
+    # FORCE_WEBUI, and a plain (no --force) invocation exists as the default path.
+    grep -q 'FORCE_WEBUI" -eq 1' "$PROJECT_DIR/setup.sh" \
+        && grep -qE 'ailocal" upgrade webui$' "$PROJECT_DIR/setup.sh" \
+        || { echo "setup.sh webui step should be idempotent, --force gated by FORCE_WEBUI" >&2; return 1; }
+}
+run_test "chati --update applies setup, idempotently (#70 follow-up)" test_update_applies_setup
+
 test_ollama_proc_pattern() {
     # The process-match pattern must catch ollama at a path/word boundary
     # but NOT a lookalike like "myollama serve". Eval the real value from
