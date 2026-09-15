@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.31.0"
+CHATI_VERSION="1.31.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -241,6 +241,20 @@ load_active_settings() {
     settings_read "$DEFAULTS_SETTINGS_FILE" 2>/dev/null || true
     local s; s=$(cat "$PREVIOUS_FILE" 2>/dev/null)
     [[ -n "$s" ]] && settings_read "$HISTORY_DIR/${s}_settings" 2>/dev/null || true
+}
+# Reload the active session's settings AND tell the user when a switch turned
+# a security-relevant toggle OFF. Each session keeps its own settings (#60), so
+# /new and /switch reset Shell/auto-accept to this session's baseline — a good
+# safety default, but a SILENT one bit users who armed /sY and then /new'd and
+# assumed shell was still on. Announce the drop so the state is never a surprise.
+reload_settings_announce() {
+    local was_agent="$AGENT_MODE" was_auto="$AGENT_AUTOACCEPT"
+    load_active_settings
+    if [[ "$was_agent" == "ON" && "$AGENT_MODE" != "ON" ]]; then
+        echo "🐚 Shell mode is OFF in this session (each session keeps its own settings — /s to enable)."
+    elif [[ "$was_auto" == "ON" && "$AGENT_AUTOACCEPT" != "ON" ]]; then
+        echo "🛡️  Auto-accept is OFF in this session (/sY to re-arm)."
+    fi
 }
 # Clean-exit handler: flush command history AND the current session's settings.
 chati_on_exit() {
@@ -1483,9 +1497,9 @@ while true; do
                 fi
                 ;;
             /sessions)   "$MOLA_CMD" list ;;
-            /new)        persist_session_settings; "$MOLA_CMD" new "$cmd_args"; load_active_settings ;;
-            /switch)     persist_session_settings; "$MOLA_CMD" switch "$cmd_args"; load_active_settings ;;
-            /back)       persist_session_settings; "$MOLA_CMD" back; load_active_settings ;;
+            /new)        persist_session_settings; "$MOLA_CMD" new "$cmd_args"; reload_settings_announce ;;
+            /switch)     persist_session_settings; "$MOLA_CMD" switch "$cmd_args"; reload_settings_announce ;;
+            /back)       persist_session_settings; "$MOLA_CMD" back; reload_settings_announce ;;
             # $cmd_args is left unquoted on purpose so "3 new_name" splits
             # into two args — but disable globbing first (set -f) so a
             # name like "*" isn't expanded against the cwd, then restore.

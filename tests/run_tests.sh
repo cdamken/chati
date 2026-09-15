@@ -780,6 +780,7 @@ eval "$(awk '/^update_say_rate\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^settings_write\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^settings_read\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^load_active_settings\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^reload_settings_announce\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 
 # Factory baseline used by the #60 tests below.
 _write_builtin_baseline() {
@@ -850,6 +851,24 @@ test_returning_session_restores_own() {
         && assert_eq "$THINK_MODE" "OFF" "restored think=OFF"
 }
 run_test "returning to a saved session restores its settings (#60)" test_returning_session_restores_own
+
+test_switch_announces_shell_drop() {
+    # #60 follow-up: when a session change resets Shell/auto-accept OFF, the user
+    # must be TOLD — a silent drop made them think /sY was still armed after /new.
+    BUILTIN_SETTINGS_FILE="$SANDBOX/builtin_c"
+    DEFAULTS_SETTINGS_FILE="$SANDBOX/no_defaults_c"     # absent on purpose
+    HISTORY_DIR="$SANDBOX/hist_c"; mkdir -p "$HISTORY_DIR"
+    PREVIOUS_FILE="$SANDBOX/prev_c"
+    _write_builtin_baseline
+    echo "brand_new_session" > "$PREVIOUS_FILE"          # no _settings → resets to baseline
+    AGENT_MODE=ON AGENT_AUTOACCEPT=ON                    # user had armed /sY before /new
+    # Run in THIS shell (not $(...)) so the reset actually mutates AGENT_MODE,
+    # capturing the announcement via a file instead of a subshell.
+    local out; reload_settings_announce > "$SANDBOX/announce_c" 2>&1; out=$(cat "$SANDBOX/announce_c")
+    assert_eq "$AGENT_MODE" "OFF" "shell dropped after switch" \
+        && assert_match "$out" "Shell mode is OFF" "announced the drop"
+}
+run_test "session change announces Shell going OFF (#60)" test_switch_announces_shell_drop
 
 test_lang_codes_map_to_full_names() {
     # A bare code in "Respond ONLY in ar" is ambiguous — small models sometimes
