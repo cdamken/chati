@@ -895,6 +895,39 @@ test_version_gt() {
 }
 run_test "version_gt compares versions numerically (self-update)" test_version_gt
 
+# --- OpenWebUI login-less persistence (ailocal resolve_webui_auth) ---
+eval "$(awk '/^resolve_webui_auth\(\) \{/,/^}$/' "$PROJECT_DIR/ai_local/ailocal")"
+test_webui_auth_persists_loginless() {
+    local dir="$SANDBOX/webui_auth"; rm -rf "$dir"; mkdir -p "$dir"
+    local db="$dir/webui.db" marker="$dir/.loginless"
+
+    # 1. Fresh DB (none yet): must go login-less AND drop the marker.
+    unset WEBUI_AUTH
+    resolve_webui_auth "" "$marker" >/dev/null
+    assert_eq "$WEBUI_AUTH" "False" "fresh DB -> login-less" || return 1
+    [[ -f "$marker" ]] || { echo "fresh DB should leave a marker" >&2; return 1; }
+
+    # 2. Existing DB WITH our marker, no env: stays login-less (the reboot case).
+    touch "$db"; unset WEBUI_AUTH
+    resolve_webui_auth "$db" "$marker" >/dev/null
+    assert_eq "$WEBUI_AUTH" "False" "marker keeps login-less across restart" || return 1
+
+    # 3. Existing DB WITHOUT a marker, no env: leave WEBUI_AUTH unset (honour
+    #    the DB's own auth — never wedge a real auth DB, #6).
+    rm -f "$marker"; unset WEBUI_AUTH
+    resolve_webui_auth "$db" "$marker" >/dev/null
+    [[ -z "${WEBUI_AUTH:-}" ]] || { echo "unmarked DB must stay unset, got '$WEBUI_AUTH'" >&2; return 1; }
+
+    # 4. Explicit WEBUI_AUTH=True wins and CLEARS the marker.
+    touch "$marker"; WEBUI_AUTH=True
+    resolve_webui_auth "$db" "$marker" >/dev/null
+    assert_eq "$WEBUI_AUTH" "True" "explicit env wins" || return 1
+    [[ ! -f "$marker" ]] || { echo "auth=True should clear the login-less marker" >&2; return 1; }
+    unset WEBUI_AUTH
+    return 0
+}
+run_test "OpenWebUI stays login-less across reboots via marker (#6)" test_webui_auth_persists_loginless
+
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {
     # The critical safety property: on ANY failure (here, a model that

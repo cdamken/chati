@@ -3,7 +3,7 @@
 # Author: Carlos Damken
 set -o pipefail
 
-AILOCAL_VERSION="3.2.0"
+AILOCAL_VERSION="3.2.1"
 
 # === GLOBAL CONFIGURATION ===
 LOG_DIR="$HOME/logs"
@@ -149,6 +149,40 @@ status() {
     fi
 }
 
+# Decide (and export) WEBUI_AUTH for this boot, and keep the choice durable.
+#   $1 = path to the live webui.db ("" if none), $2 = login-less marker path.
+# OpenWebUI defaults WEBUI_AUTH to True when it's unset, and the autostart
+# LaunchAgent runs a bare `ailocal start` with no env — so an existing DB would
+# silently get the login wall back on the next reboot (the recurring "why is
+# OpenWebUI asking me to log in again", a 401 on /ollama/api/tags with no way
+# in). We drop a marker beside the DB the first time we go login-less and
+# re-apply WEBUI_AUTH=False whenever it's present, so the choice survives
+# restarts without touching the DB or the LaunchAgent. Precedence:
+#   1. explicit WEBUI_AUTH in the env always wins (and updates the marker)
+#   2. fresh DB (none yet)      → login-less + remember it
+#   3. marker present           → login-less (our own login-less DB)
+#   4. pre-existing DB, no marker → leave unset (honour the DB's own auth, #6)
+resolve_webui_auth() {
+    local webui_db="$1" marker="$2" marker_dir
+    marker_dir="$(dirname "$marker")"
+    if [[ -n "${WEBUI_AUTH:-}" ]]; then
+        export WEBUI_AUTH
+        if [[ "$WEBUI_AUTH" == "False" ]]; then
+            mkdir -p "$marker_dir" 2>/dev/null; : > "$marker" 2>/dev/null
+        else
+            rm -f "$marker" 2>/dev/null
+        fi
+    elif [[ -z "$webui_db" ]]; then
+        export WEBUI_AUTH="False"
+        mkdir -p "$marker_dir" 2>/dev/null; : > "$marker" 2>/dev/null
+    elif [[ -f "$marker" ]]; then
+        export WEBUI_AUTH="False"
+    else
+        echo "ℹ️  Existing OpenWebUI database detected — keeping its own auth setting."
+        echo "    (Force login-less with WEBUI_AUTH=False, or wipe it: ./setup.sh --remove-webui)"
+    fi
+}
+
 startwebui() {
     if pgrep -f "$WEBUI_PROC" > /dev/null; then
         echo "OpenWebUI is already running"
@@ -184,12 +218,10 @@ startwebui() {
     # to chat (#6). On a pre-existing DB we therefore leave WEBUI_AUTH unset so
     # OpenWebUI honours whatever the DB was set up with; an explicit
     # WEBUI_AUTH=… in the environment still wins in either case.
-    if [[ -n "$(find_webui_db)" && -z "${WEBUI_AUTH:-}" ]]; then
-        echo "ℹ️  Existing OpenWebUI database detected — keeping its own auth setting."
-        echo "    (Force login-less with WEBUI_AUTH=False, or wipe it: ./setup.sh --remove-webui)"
-    else
-        export WEBUI_AUTH="${WEBUI_AUTH:-False}"
-    fi
+    #
+    # A login-less DB we created ourselves must STAY login-less across reboots.
+    # See resolve_webui_auth for the full rationale and the marker mechanism.
+    resolve_webui_auth "$(find_webui_db)" "$OPENWEBUI_DATA_DIR/.loginless"
 
     # Wire OpenWebUI's built-in web search to the local SearXNG when it's
     # installed, so the browser UI's search works out of the box. Both the
