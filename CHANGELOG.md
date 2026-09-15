@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.31.3] - 2026-09-15
+
+### Added
+- **`setup.sh` writes a full install transcript to `~/logs/chati_install_<timestamp>.log`.**
+  The console scrolls and callers often pipe the installer through `tail`, so the
+  early steps — including which models `ollama pull` fetched and by which step —
+  used to be unrecoverable after the fact. The whole install (every step, every
+  pull, every warning) is now teed to a timestamped logfile, and its path is
+  printed at the end. This is what let us confirm a clean install pulls only the
+  chat model plus the two `/web` helpers, so a stray `nomic-embed-text` came from
+  an outside client hitting an Ollama that a leaked `OLLAMA_HOST=0.0.0.0` had left
+  exposed — not from the installer. Uninstalls are not logged (`--remove-all`
+  wipes `~/logs`).
+
 ## [1.31.2] - 2026-09-15
 
 ### Fixed

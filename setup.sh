@@ -360,6 +360,19 @@ if [[ "$REMOVE_ALL"     -eq 1 ]]; then remove_all;     fi
 if [[ "$REMOVE_WEBUI"   -eq 1 ]]; then remove_webui;   fi
 if [[ "$REMOVE_SEARXNG" -eq 1 ]]; then remove_searxng; fi
 
+# ---- Install transcript log --------------------------------------------------
+# Capture the WHOLE install (every step, every `ollama pull`, every warning) to
+# a timestamped logfile. The console scrolls and callers often pipe us through
+# `tail`, so the early steps — including which models got pulled and by which
+# step — used to be unrecoverable after the fact. The log keeps all of it.
+# Uninstalls are intentionally NOT logged here (remove_all wipes ~/logs).
+INSTALL_LOG="$HOME/logs/chati_install_$(date +%Y%m%d_%H%M%S).log"
+mkdir -p "$HOME/logs"
+# Tee stdout+stderr to the log while still showing it on the console.
+exec > >(tee -a "$INSTALL_LOG") 2>&1
+echo "==> chati install log — $(date)"
+echo "    repo=$REPO_ROOT client_only=$CLIENT_ONLY${CLIENT_MODE:+/$CLIENT_MODE} webui=$WANT_WEBUI searxng=$WANT_SEARXNG pull=$WANT_PULL model=$CHAT_MODEL"
+
 echo "🚀 chati setup — repo at: $REPO_ROOT"
 
 # ---- 1. Platform check -------------------------------------------------------
@@ -601,4 +614,5 @@ Uninstall everything:    ./setup.sh --remove-all
 EOF
 echo "  (Ollama has no auth — 'lan on' exposes it on your LAN/Tailscale only when you ask;"
 echo "   it also enables auto-heal so the bind survives the Mac sleeping. Off by default.)"
+echo "Install log:             ${INSTALL_LOG:-$HOME/logs/chati_install_*.log}"
 echo
