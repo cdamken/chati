@@ -7,6 +7,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.31.2] - 2026-09-15
+
+### Fixed
+- **OpenWebUI stays login-less across reboots.** A login-less database that
+  ailocal created itself now keeps `WEBUI_AUTH=False` on every restart. Before,
+  OpenWebUI defaults `WEBUI_AUTH` to `True` when it's unset, and the autostart
+  LaunchAgent runs a bare `ailocal start` (no env), so on the next reboot an
+  existing DB silently got the login wall back — the recurring "why is OpenWebUI
+  asking me to log in again", with a `401` on `/ollama/api/tags` and no way in.
+  `startwebui` now drops a `.loginless` marker beside the DB the first time it
+  goes login-less (fresh DB, or an explicit `WEBUI_AUTH=False`) and re-applies
+  `WEBUI_AUTH=False` whenever that marker is present. Pre-existing auth DBs
+  without the marker are untouched, and an explicit `WEBUI_AUTH=…` in the
+  environment still wins. (ailocal 3.2.1)
+
 ## [1.31.1] - 2026-09-15
 
 ### Fixed
