@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.31.4"
+CHATI_VERSION="1.32.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -62,11 +62,50 @@ chati_self_update() {
         echo "   git -C \"$CHATI_DIR\" fetch origin && git -C \"$CHATI_DIR\" reset --hard origin/main" >&2
         return 1
     fi
-    if git -C "$CHATI_DIR" pull --ff-only >/dev/null 2>&1; then
-        echo "✅ Updated to chati $(cat "$CHATI_DIR/VERSION" 2>/dev/null || echo "$latest"). Restart chati to use it."
-    else
+    local before after
+    before=$(git -C "$CHATI_DIR" rev-parse HEAD 2>/dev/null)
+    if ! git -C "$CHATI_DIR" pull --ff-only >/dev/null 2>&1; then
         echo "chati: git pull failed. Try:  git -C \"$CHATI_DIR\" fetch origin && git -C \"$CHATI_DIR\" reset --hard origin/main" >&2
         return 1
+    fi
+    after=$(git -C "$CHATI_DIR" rev-parse HEAD 2>/dev/null)
+    local newver; newver=$(cat "$CHATI_DIR/VERSION" 2>/dev/null || echo "$latest")
+    if [[ "$before" == "$after" ]]; then
+        echo "✅ chati is already at the latest code ($newver)."
+        return 0
+    fi
+    echo "✅ Pulled chati $newver. Applying changes…"
+    # A thin-client install (remote Ollama, set up with --client/--client-minimal)
+    # has no local server stack, and setup's server path would try to install one.
+    # Its code updates come from the pull alone, so skip setup there. Detect the
+    # client by a non-local OLLAMA_HOST in .env.
+    local is_client=0 oh
+    if [[ -f "$CHATI_DIR/.env" ]]; then
+        oh=$(grep -E '^[[:space:]]*(export[[:space:]]+)?OLLAMA_HOST=' "$CHATI_DIR/.env" | tail -1)
+        case "$oh" in
+            ""|*localhost*|*127.0.0.1*|*0.0.0.0*) ;;
+            *) is_client=1 ;;
+        esac
+    fi
+    if [[ "$is_client" -eq 1 ]]; then
+        echo "✅ Updated to chati $newver (client install; the pull is all that's needed). Restart chati to use it."
+        return 0
+    fi
+    # Full install: re-run setup in --update mode to apply the new code. It
+    # respects the installed profile (won't turn a --minimal box into a full one)
+    # and is idempotent (no heavy webui reinstall unless PyPI moved). This closes
+    # the old gap where `chati --update` pulled code but never applied it, so a
+    # change (config, wiring, a webui reset) never landed.
+    if [[ -x "$CHATI_DIR/setup.sh" ]]; then
+        if "$CHATI_DIR/setup.sh" --update --yes; then
+            echo "✅ Updated to chati $newver and applied. Restart chati to use it."
+        else
+            echo "⚠️  Updated to chati $newver, but applying setup hit a snag." >&2
+            echo "    Finish it by hand:  \"$CHATI_DIR/setup.sh\" --update" >&2
+            return 1
+        fi
+    else
+        echo "✅ Updated to chati $newver. Restart chati to use it."
     fi
 }
 
