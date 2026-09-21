@@ -363,15 +363,17 @@ The user is in AGENT mode: they can run commands on their own computer (organize
 
     local prompt="You are a router that decides whether a user message needs a LIVE WEB SEARCH to be answered well.
 
-Answer SEARCH if answering needs fresh, real-time, or external facts: current events, news, weather, prices, stock/financial figures, sports scores, release dates, live status, or anything tied to 'today'/'now'/'latest'/'current', or specific recent data a language model likely does not know. ALSO answer SEARCH if the task must FETCH something from the internet (download an image, file, or web page), even when the result is then saved locally.
+Answer SEARCH if answering needs fresh, real-time, or external facts: current events, news, weather, prices, stock/financial figures, sports scores, release dates, live status, or anything tied to 'today'/'now'/'latest'/'current', or specific recent data a language model likely does not know. ALSO answer SEARCH if fulfilling the request first requires DISCOVERING or researching WHAT to fetch (e.g. 'download some cat pictures' — you have to find images first).
 
-Answer DIRECT if a language model can answer from its own knowledge (jokes, creative writing, code, explanations, definitions, math, translation, rewriting or summarizing text the user gave, opinions, general or historical knowledge), OR if the request is an ACTION on the user's OWN computer or files that needs no external data: organizing a folder, moving/renaming/reading local files, running a local command, inspecting the system.
+Answer DIRECT if a language model can answer from its own knowledge (jokes, creative writing, code, explanations, definitions, math, translation, rewriting or summarizing text the user gave, opinions, general or historical knowledge), OR if the request is an ACTION on the user's OWN computer or files that needs no research: organizing a folder, moving/renaming/reading local files, running a local command, inspecting the system. Downloading a SPECIFIC named resource from a URL you can construct without searching (a known release or ISO, or an explicit link the user gave) is such an action — the agent just fetches it with curl — so that is DIRECT, NOT search. Search is for finding facts or discovering which thing to fetch, never for running a download whose URL is already known.
 $agent_note
 Examples:
 - \"organize my Downloads into folders by type\" -> DIRECT (local action)
 - \"read ~/contract.pdf and summarize it\" -> DIRECT (local file)
 - \"move all the invoices to a Facturas folder\" -> DIRECT (local action)
-- \"download cat images into ~/Downloads\" -> SEARCH (must fetch from the web)
+- \"download the Ubuntu Server 26.04 ISO into ~/Downloads\" -> DIRECT (known artifact, fetch with curl)
+- \"download https://example.com/file.zip to ~/Downloads\" -> DIRECT (explicit URL)
+- \"download cat images into ~/Downloads\" -> SEARCH (must first find WHICH images)
 - \"latest USD/EUR exchange rate\" -> SEARCH (fresh data)
 - \"write a haiku about the sea\" -> DIRECT
 
