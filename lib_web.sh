@@ -186,9 +186,45 @@ _searxng_query_one() {
     if ! jq -e . "$body" >/dev/null 2>&1; then
         rm -f "$body"; echo "Error: SearXNG returned non-JSON (auth challenge?)."; return 2
     fi
-    local text; text=$(format_search_results < "$body"); rm -f "$body"
-    [[ -z "$text" ]] && { echo "No results found."; return 0; }
-    printf '%s' "$text" | utf8_truncate "$max_chars"
+    local out rc
+    out=$(_searxng_render_body "$body"); rc=$?
+    rm -f "$body"
+    printf '%s' "$out"
+    return $rc
+}
+
+# Turn a SearXNG JSON body (already fetched: HTTP 2xx, valid JSON) into the
+# text handed back to the caller. stdout = formatted hits, "No results
+# found.", or an "Error: ..." line. Return: 0 for real hits OR a GENUINE
+# empty (the engines answered, there was just nothing), 2 when the backend
+# is DEGRADED — SearXNG replied 200 but every engine that would have
+# answered was unavailable (CAPTCHA / ban / rate-limit), so the empty is an
+# artifact of a broken search, not of the query. That distinction is the
+# whole point: a consumer (a pipeline, `chati --search`) must be able to
+# tell "searched, found nothing" from "search is broken and gave up", or it
+# runs on blindly. Kept separate from _searxng_query_one so it is unit-
+# testable from a JSON fixture with no live SearXNG.
+_searxng_render_body() {
+    local body="$1" max_chars="${MAX_WEB_CHARS:-6000}"
+    local text; text=$(format_search_results < "$body")
+    # Any real hit wins outright: unresponsive_engines is routinely non-empty
+    # even on a good search (one engine throttled while others answered), so
+    # it must NEVER downgrade a non-empty result — only classify an empty one.
+    if [[ -n "$text" ]]; then
+        printf '%s' "$text" | utf8_truncate "$max_chars"
+        return 0
+    fi
+    local unresp; unresp=$(jq -r '
+        (.unresponsive_engines // [])
+        | map(if type == "array" then (.[0] | tostring)
+              elif type == "object" then (.engine // .name // "engine")
+              else tostring end)
+        | unique | join(", ")' "$body" 2>/dev/null)
+    if [[ -n "$unresp" ]]; then
+        echo "Error: SearXNG returned no results; every engine was unavailable ($unresp)."
+        return 2
+    fi
+    echo "No results found."
     return 0
 }
 
