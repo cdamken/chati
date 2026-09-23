@@ -7,6 +7,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.33.0] - 2026-09-23
+
+### Added
+- **The installer ensures three shared models by default**, so every machine
+  in a multi-host pool runs the *same* models and work can be routed to any
+  box with comparable output: `gemma4:31b` (dense, max-quality general model),
+  `gemma4:26b` (faster MoE alternative) and `bge-m3` (RAG embeddings). These
+  are pulled alongside the RAM-selected chat model and the `/web` helpers.
+  - **Exact tags matter:** the installer pulls `gemma4:31b`, *not*
+    `gemma4:31b-it-qat` (a different, quantized model). Tooling that asks for
+    `gemma4:31b` gets that exact tag.
+  - **RAM guard:** the two `gemma4` models (~37 GB together) are auto-skipped
+    below 24 GB of RAM. A ~19 GB model can't load without headroom, so pulling
+    it would just waste disk. `bge-m3` (~1.2 GB) is always pulled.
+  - **New flags:** `--no-extra-models` pulls only `bge-m3` alongside the chat
+    model (skips the big pair); `--force-models` pulls the big pair even on a
+    low-RAM box. The setup summary and `--help` document the sizes.
+
 ## [1.32.2] - 2026-09-23
 
 ### Fixed
