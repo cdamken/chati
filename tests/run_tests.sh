@@ -643,6 +643,68 @@ test_render_body_hits_ignore_unresponsive() {
 }
 run_test "_searxng_render_body ignores unresponsive engines when hits exist" test_render_body_hits_ignore_unresponsive
 
+# --- web_search retry-with-backoff (intermittent empties become hits) ---
+# Stub _web_search_once so no network is touched; a counter file survives the
+# command-substitution subshells web_search runs it in. Delay forced to 0.
+test_web_search_retries_then_succeeds() {
+    local orig; orig=$(declare -f _web_search_once)
+    local cf; cf=$(mktemp); printf '0' > "$cf"
+    _web_search_once() {
+        local c; c=$(cat "$cf"); c=$((c+1)); printf '%s' "$c" > "$cf"
+        if (( c < 2 )); then printf 'No results found.'; else printf 'T\nC\n[brave] https://x/a'; fi
+    }
+    local out; out=$(WEB_SEARCH_RETRIES=3 WEB_SEARCH_RETRY_DELAY=0 web_search "q")
+    local calls; calls=$(cat "$cf"); rm -f "$cf"
+    eval "$orig"
+    assert_match "$out" "\\[brave\\] https://x/a" "empty-then-hit returns the hit" \
+        && assert_eq "$calls" "2" "retried once (2 calls) before the hit"
+}
+run_test "web_search retries an intermittent empty and returns the later hit" test_web_search_retries_then_succeeds
+
+test_web_search_no_retry_on_hits() {
+    local orig; orig=$(declare -f _web_search_once)
+    local cf; cf=$(mktemp); printf '0' > "$cf"
+    _web_search_once() {
+        local c; c=$(cat "$cf"); c=$((c+1)); printf '%s' "$c" > "$cf"
+        printf 'T\nC\n[google cse] https://x/a'
+    }
+    local out; out=$(WEB_SEARCH_RETRIES=3 WEB_SEARCH_RETRY_DELAY=0 web_search "q")
+    local calls; calls=$(cat "$cf"); rm -f "$cf"
+    eval "$orig"
+    assert_eq "$calls" "1" "a first-pass hit is not retried (1 call)" \
+        && assert_match "$out" "google cse" "returns the hit"
+}
+run_test "web_search does not retry when the first pass has hits" test_web_search_no_retry_on_hits
+
+test_web_search_gives_up_after_retries() {
+    local orig; orig=$(declare -f _web_search_once)
+    local cf; cf=$(mktemp); printf '0' > "$cf"
+    _web_search_once() {
+        local c; c=$(cat "$cf"); c=$((c+1)); printf '%s' "$c" > "$cf"
+        printf 'No results found.'
+    }
+    local out; out=$(WEB_SEARCH_RETRIES=2 WEB_SEARCH_RETRY_DELAY=0 web_search "q")
+    local calls; calls=$(cat "$cf"); rm -f "$cf"
+    eval "$orig"
+    assert_eq "$out" "No results found." "a persistent empty is returned as-is" \
+        && assert_eq "$calls" "3" "tried the initial pass + 2 retries (3 calls)"
+}
+run_test "web_search gives up with the empty after exhausting retries" test_web_search_gives_up_after_retries
+
+test_web_search_no_retry_on_misconfig() {
+    local orig; orig=$(declare -f _web_search_once)
+    local cf; cf=$(mktemp); printf '0' > "$cf"
+    _web_search_once() {
+        local c; c=$(cat "$cf"); c=$((c+1)); printf '%s' "$c" > "$cf"
+        printf 'Error: SEARXNG_URLS / SEARXNG_URL is not configured.'
+    }
+    local out; out=$(WEB_SEARCH_RETRIES=3 WEB_SEARCH_RETRY_DELAY=0 web_search "q")
+    local calls; calls=$(cat "$cf"); rm -f "$cf"
+    eval "$orig"
+    assert_eq "$calls" "1" "a misconfiguration error is not transient (1 call)"
+}
+run_test "web_search does not retry a misconfiguration error" test_web_search_no_retry_on_misconfig
+
 test_select_extra_models_default_big_box() {
     _load_select_extra_models || { echo "could not load select_extra_models" >&2; return 1; }
     local out; out=$(select_extra_models 32 1 0)

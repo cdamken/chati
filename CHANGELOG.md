@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.33.1] - 2026-09-23
+
+### Fixed
+- **`web_search` now retries an intermittent empty/rate-limit before giving
+  up.** The upstream engines a SearXNG instance depends on cycle in and out of
+  soft blocks over the *same* query: a request comes back empty or throttled
+  and then succeeds seconds later. That made `--search` unreliable for
+  automated callers, who saw a transient empty as a final "nothing found". When
+  a pass yields no real hits (a genuine/soft empty or an `Error:`), `web_search`
+  now waits and retries, up to `WEB_SEARCH_RETRIES` times (default 2 → 3 passes)
+  with a short growing backoff (`WEB_SEARCH_RETRY_DELAY`, default 2s). A pass
+  with real hits returns at once, so a healthy query pays nothing; a
+  misconfiguration error is never retried. Set `WEB_SEARCH_RETRIES=0` to restore
+  the old single-pass behavior. The single-pass logic moved unchanged into
+  `_web_search_once`.
+
+### Added
+- **`chati --search` prints a `served by: <engines>` audit line to stderr.**
+  Parsed from the `[engine]` tags of the hits, so a caller can tell broad
+  coverage from a single thin surviving engine (e.g. only `bing news` when the
+  rest are IP-blocked). `stdout` stays results-only.
+
 ## [1.33.0] - 2026-09-23
 
 ### Added
