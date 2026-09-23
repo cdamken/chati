@@ -975,6 +975,22 @@ test_router_parses_and_takes_agent_arg() {
 }
 run_test "web_query_needs_search parses reply and takes the agent arg (#33)" test_router_parses_and_takes_agent_arg
 
+test_router_prompt_routes_known_download_direct() {
+    # A download whose URL is known/derivable is a fetch action (curl), not
+    # research. The router prompt must say so, so "download the ISO into
+    # Downloads" isn't shoved through the RAG search pipeline (which decomposes
+    # it into queries and returns nothing useful). We assert the instruction is
+    # present in the prompt; the model's actual call is its job, tested live.
+    local pf; pf=$(mktemp)
+    ollama_chat_oneshot() { printf '%s' "$2" > "$pf"; echo "DIRECT"; }
+    web_query_needs_search "descarga la ISO de ubuntu server 26.04 en Downloads" "ON" >/dev/null
+    grep -qi 'known release or ISO' "$pf" \
+        && grep -qi 'DIRECT (known artifact' "$pf" \
+        || { echo "router prompt should route a known-URL download to DIRECT" >&2; rm -f "$pf"; return 1; }
+    rm -f "$pf"
+}
+run_test "web_query_needs_search routes a known-URL download to DIRECT" test_router_prompt_routes_known_download_direct
+
 # --- ollama_running probe ---
 test_ollama_running_returns_boolean() {
     if ollama_running; then

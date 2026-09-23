@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.32.1] - 2026-09-21
+
+### Fixed
+- **`/web` no longer sends a file download through the research pipeline.** The
+  auto-web router (`web_query_needs_search`) was told to answer SEARCH for
+  anything that "must fetch something from the internet, even when saved
+  locally", so "download the Ubuntu Server ISO into Downloads" got routed to the
+  SearXNG + RAG pipeline, which decomposed the order into 8 search queries and
+  returned nothing (it is a research tool, not a downloader). The router now
+  treats downloading a specific named resource from a URL it can construct
+  without searching (a known release/ISO, or an explicit link) as a local fetch
+  action (curl) → DIRECT; SEARCH stays for finding facts or discovering *which*
+  thing to fetch (e.g. "download some cat pictures").
+
 ## [1.32.0] - 2026-09-15
 
 ### Changed
