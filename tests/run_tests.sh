@@ -577,6 +577,17 @@ test_format_results_empty() {
 }
 run_test "format_search_results yields empty for no hits" test_format_results_empty
 
+# --- _searxng_render_body: genuine-empty vs degraded-backend ---
+# The core of the --search "No results found for everything" fix: an empty
+# result set must be classified, not blindly reported as "No results found."
+_render_body() { # $1 = JSON → stdout = render output; return = _searxng_render_body's rc
+    local f; f=$(mktemp)
+    printf '%s' "$1" > "$f"
+    _searxng_render_body "$f"; local rc=$?
+    rm -f "$f"
+    return $rc
+}
+
 # --- setup.sh select_extra_models (RAM guard + flags for the default models) ---
 # Pure decision function: which models to ensure beyond the chat model. Extract
 # it from setup.sh (sourcing the whole installer would run it), then exercise
@@ -592,6 +603,45 @@ _load_select_extra_models() {
     rm -f "$f"
     return $rc
 }
+
+test_render_body_hits_pass_through() {
+    local out rc; out=$(_render_body '{"results":[{"title":"T","content":"C","url":"https://x/a","engine":"ddg"}]}'); rc=$?
+    assert_eq "$rc" "0" "hits → rc 0" \
+        && assert_match "$out" "\\[ddg\\] https://x/a" "hit rendered"
+}
+run_test "_searxng_render_body passes real hits through (rc 0)" test_render_body_hits_pass_through
+
+test_render_body_genuine_empty() {
+    # 200, no results, and every engine ANSWERED (unresponsive empty) → the
+    # search genuinely found nothing. That is rc 0, "No results found.".
+    local out rc; out=$(_render_body '{"results":[],"unresponsive_engines":[]}'); rc=$?
+    assert_eq "$rc" "0" "genuine empty → rc 0" \
+        && assert_eq "$out" "No results found." "genuine empty message"
+}
+run_test "_searxng_render_body treats a genuine empty as rc 0" test_render_body_genuine_empty
+
+test_render_body_degraded_is_error() {
+    # 200 but no results BECAUSE the engines were unavailable (CAPTCHA / ban /
+    # rate-limit) → degraded backend, NOT a genuine empty. rc 2, Error line
+    # naming the dead engines. This is what stops a pipeline from running on
+    # empty context and calling a broken search "nothing found".
+    local out rc; out=$(_render_body '{"results":[],"unresponsive_engines":[["brave","too many requests"],["duckduckgo","CAPTCHA"]]}'); rc=$?
+    assert_eq "$rc" "2" "degraded backend → rc 2 (not 0)" \
+        && assert_match "$out" "^Error:" "degraded → Error line" \
+        && assert_match "$out" "brave" "names the dead engine brave" \
+        && assert_match "$out" "duckduckgo" "names the dead engine duckduckgo"
+}
+run_test "_searxng_render_body flags a degraded backend as an error" test_render_body_degraded_is_error
+
+test_render_body_hits_ignore_unresponsive() {
+    # A partial outage must NEVER downgrade a good result: hits present while
+    # one engine was throttled is still a success (rc 0), no Error line.
+    local out rc; out=$(_render_body '{"results":[{"title":"T","content":"C","url":"https://x/a","engine":"bing news"}],"unresponsive_engines":[["brave","too many requests"]]}'); rc=$?
+    assert_eq "$rc" "0" "hits despite an outage → rc 0" \
+        && assert_match "$out" "\\[bing news\\] https://x/a" "hit rendered despite outage"
+    [[ "$out" != Error:* ]] || { echo "unexpected Error line with hits present" >&2; return 1; }
+}
+run_test "_searxng_render_body ignores unresponsive engines when hits exist" test_render_body_hits_ignore_unresponsive
 
 test_select_extra_models_default_big_box() {
     _load_select_extra_models || { echo "could not load select_extra_models" >&2; return 1; }

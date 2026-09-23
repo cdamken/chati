@@ -165,8 +165,21 @@ case "${1:-}" in
             echo "chati: web search unavailable (lib_web.sh not loaded)." >&2
             exit 1
         fi
-        web_search "$*"
-        exit $?
+        # Exit code carries the signal a pipeline needs: 0 when the search
+        # actually ran (real hits OR a genuine empty), non-zero when the
+        # backend was broken (all engines down / rate-limited / transport
+        # error). Otherwise a consumer can't tell "found nothing" from
+        # "search is down" and keeps running on empty context. The diagnostic
+        # Error line goes to stderr so stdout stays clean (results only).
+        _out=$(web_search "$*")
+        case "$_out" in
+            "Error:"*)
+                printf '%s\n' "$_out" >&2
+                exit 3 ;;
+            *)
+                printf '%s\n' "$_out"
+                exit 0 ;;
+        esac
         ;;
 esac
 
