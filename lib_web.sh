@@ -263,14 +263,14 @@ web_search_available() {
     return 1
 }
 
-# Query SearXNG across the configured endpoints with RANDOM round-robin +
-# failover + per-endpoint rate-limit cooldown. Prints formatted results,
-# "No results found.", or an "Error: ..." line. Always returns 0 —
+# ONE query pass over SearXNG across the configured endpoints with RANDOM
+# round-robin + failover + per-endpoint rate-limit cooldown. Prints formatted
+# results, "No results found.", or an "Error: ..." line. Always returns 0 —
 # chati's do_web_research dispatches on the string prefix. Spreads load
 # over several IPs (~1/N each) so a heavy batch multiplies the rate-limit
 # ceiling; a 429'd endpoint is parked (cooldown) so traffic flows to the
 # healthy ones instead of bouncing off the limited one.
-web_search() {
+_web_search_once() {
     local query="$1"
     local -a urls=(); local u
     while IFS= read -r u; do urls+=("$u"); done < <(searxng_endpoints)
@@ -308,6 +308,37 @@ web_search() {
         done
     fi
     printf '%s' "$last"
+}
+
+# web_search = _web_search_once + RETRY WITH BACKOFF. The upstream engines a
+# SearXNG instance depends on are intermittently flaky over the SAME query: a
+# request can come back empty or rate-limited and then succeed a few seconds
+# later (an engine cycling in and out of a soft block). That intermittency is
+# exactly what made --search unreliable for automated callers, who saw a
+# transient empty as a final "nothing found". So when a pass yields no real
+# hits (a genuine/soft empty OR an Error), wait and try again, up to
+# WEB_SEARCH_RETRIES times (default 2 → 3 attempts total) with a short growing
+# backoff (WEB_SEARCH_RETRY_DELAY, default 2s). A pass with real hits returns
+# at once, so a healthy query pays nothing. Set WEB_SEARCH_RETRIES=0 to
+# restore the old single-pass behavior. Still always returns 0.
+web_search() {
+    local query="$1"
+    local retries="${WEB_SEARCH_RETRIES:-2}" delay="${WEB_SEARCH_RETRY_DELAY:-2}"
+    local attempt=0 out
+    while : ; do
+        out=$(_web_search_once "$query")
+        # Real hits → done. Only a genuine/soft empty or an Error is retried.
+        case "$out" in
+            "No results found."*|"Error:"*) : ;;
+            *) printf '%s' "$out"; return 0 ;;
+        esac
+        (( attempt >= retries )) && break
+        # Misconfiguration is not transient — never worth retrying.
+        [[ "$out" == "Error: SEARXNG_URLS"* ]] && break
+        sleep $(( delay + attempt * delay ))
+        attempt=$(( attempt + 1 ))
+    done
+    printf '%s' "$out"
 }
 
 # Run several web_search calls with BOUNDED CONCURRENCY, preserving input order.

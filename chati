@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.33.0"
+CHATI_VERSION="1.33.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -178,6 +178,13 @@ case "${1:-}" in
                 exit 3 ;;
             *)
                 printf '%s\n' "$_out"
+                # Audit line on stderr: which engines actually served the
+                # hits, so a caller can tell broad coverage from one thin
+                # surviving engine (e.g. only "bing news" when the rest are
+                # IP-blocked). Parsed from the "[engine] url" tags; stdout
+                # stays results-only.
+                _eng=$(printf '%s\n' "$_out" | sed -nE 's|^\[([^]]+)\] https?://.*|\1|p' | sort -u | paste -sd, -)
+                [[ -n "$_eng" ]] && printf 'served by: %s\n' "$_eng" >&2
                 exit 0 ;;
         esac
         ;;
