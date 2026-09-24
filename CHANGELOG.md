@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.31.5] - 2026-09-24
+
+### Changed
+- **`/s` now asks `Execute? (y/N)` for EVERY command, read-only ones included.**
+  Verification mode used to auto-run whitelisted read-only commands (`ls`, `find`,
+  `grep`, `git status`…) with no prompt, so `/s` often executed things without
+  asking — surprising, since its whole point is that you approve each command.
+  Now every proposed command waits for your `y` in `/s`; commands that could
+  modify files, processes, network or system still show a `⚠️` warning first, so
+  the risky ones stand out. `/sY` is unchanged: it runs everything without asking.
+  The read-only classifier stays, but now only decides whether to show the
+  warning, never whether to skip the prompt (`CHATI_AGENT_CONFIRM=all` is gone —
+  confirming every command is the default).
+
 ## [1.31.4] - 2026-09-15
 
 ### Changed

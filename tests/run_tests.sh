@@ -1299,7 +1299,8 @@ test_gate_accepts_explicit_yes() {
 }
 run_test "agent gate accepts explicit y/Y/yes" test_gate_accepts_explicit_yes
 
-# --- agent_cmd_is_safe (whitelist auto-run) ---
+# --- agent_cmd_is_safe (read-only classifier: now only suppresses the warning;
+#     /s asks for EVERY command, so this no longer bypasses the prompt) ---
 test_agent_safe_allows_readonly() {
     local c
     for c in "ls -la ~" "cat /etc/hosts" "grep -r foo ." "find ~ -name '*.md'" \
@@ -1310,7 +1311,7 @@ test_agent_safe_allows_readonly() {
         fi
     done
 }
-run_test "agent whitelist auto-runs read-only commands" test_agent_safe_allows_readonly
+run_test "agent_cmd_is_safe classifies read-only commands as safe (no warning)" test_agent_safe_allows_readonly
 
 test_agent_safe_blocks_risky() {
     local c
@@ -1325,7 +1326,7 @@ test_agent_safe_blocks_risky() {
         fi
     done
 }
-run_test "agent whitelist prompts for risky/composed commands" test_agent_safe_blocks_risky
+run_test "agent_cmd_is_safe flags risky/composed commands (warning)" test_agent_safe_blocks_risky
 
 # --- macro_fola (send_and_capture stubbed) ---
 test_macro_fola_real_newlines() {

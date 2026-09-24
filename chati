@@ -19,7 +19,7 @@ CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
 
-CHATI_VERSION="1.31.4"
+CHATI_VERSION="1.31.5"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -1227,12 +1227,10 @@ Mode Toggles:
                         gemma4, qwen3…); on a plain model /think says so.
 /shell (/s)             Toggle Shell Mode — let the AI propose shell
                         commands to run on your Mac (you approve them).
-                        Read-only commands (ls, cat, grep, find, ps…) run
-                        directly; anything that could modify files,
-                        processes, network or system shows a warning and
-                        asks "Execute? (y/N)" — denied unless you type y.
-                        Set CHATI_AGENT_CONFIRM=all to confirm every
-                        command. Off by default.
+                        EVERY command asks "Execute? (y/N)" first — denied
+                        unless you type y; commands that could modify files,
+                        processes, network or system also show a warning.
+                        Off by default.
 /sY                     Toggle AUTO-ACCEPT (capital Y, on purpose so it
                         can't happen by accident): runs EVERY proposed
                         command WITHOUT asking — including destructive ones.
@@ -1581,19 +1579,19 @@ while true; do
                 # verification; otherwise it toggles ON(verification)/OFF.
                 if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
                     AGENT_AUTOACCEPT="OFF"
-                    echo "🛡️  Shell: ON (verification) — auto-accept OFF; risky commands ask 'Execute? (y/N)' again."
+                    echo "🛡️  Shell: ON (verification) — auto-accept OFF; every command asks 'Execute? (y/N)' again."
                 elif [[ "$AGENT_MODE" == "ON" ]]; then
                     AGENT_MODE="OFF"
                     echo "🐚 Shell: OFF — the AI can no longer run shell commands."
                 else
                     AGENT_MODE="ON"
-                    echo "🛡️  Shell: ON (verification) — the AI proposes commands; read-only ones run directly,"
-                    echo "    anything that could change files/processes/network/system asks 'Execute? (y/N)'."
+                    echo "🛡️  Shell: ON (verification) — the AI proposes commands and EVERY one asks"
+                    echo "    'Execute? (y/N)' before it runs. Use /sY to auto-accept without asking."
                 fi ;;
             /sY)   # capital Y on purpose — a deliberate, can't-happen-by-accident switch
                 if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
                     AGENT_AUTOACCEPT="OFF"   # AGENT_MODE stays ON → back to verification
-                    echo "🛡️  Shell: ON (verification) — auto-accept OFF; risky commands ask again."
+                    echo "🛡️  Shell: ON (verification) — auto-accept OFF; every command asks again."
                 else
                     AGENT_MODE="ON"; AGENT_AUTOACCEPT="ON"
                     echo "🔴 ⚠️  AUTO-ACCEPT ON — the AI will run EVERY command it proposes on your Mac"
@@ -1942,11 +1940,13 @@ while true; do
             if [[ "$AGENT_AUTOACCEPT" == "ON" ]]; then
                 echo "   🔴 auto-accept (/sY) — running without asking"
                 run_it=1
-            elif [[ "${CHATI_AGENT_CONFIRM:-}" != "all" ]] && agent_cmd_is_safe "$agent_cmd"; then
-                echo "   ✅ read-only — running without confirmation"
-                run_it=1
             else
-                echo "   ⚠️  This may modify files, processes, network or system — review it."
+                # /s verification: EVERY command asks — including read-only ones.
+                # agent_cmd_is_safe no longer gates the prompt; it only decides
+                # whether to show the "may modify…" warning, so `ls`/`find` ask
+                # without a scary banner while risky commands still get flagged.
+                agent_cmd_is_safe "$agent_cmd" \
+                    || echo "   ⚠️  This may modify files, processes, network or system — review it."
                 read -rp "✅ Execute? (y/N): " confirm
                 if (( _chati_interrupted )); then echo; echo "🛑 Stopped."; break; fi
                 agent_confirmed "$confirm" && run_it=1
