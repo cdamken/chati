@@ -310,9 +310,15 @@ reload_settings_announce() {
     local was_agent="$AGENT_MODE" was_auto="$AGENT_AUTOACCEPT"
     load_active_settings
     if [[ "$was_agent" == "ON" && "$AGENT_MODE" != "ON" ]]; then
-        echo "🐚 Shell mode is OFF in this session (each session keeps its own settings — /s to enable)."
+        echo ""
+        echo "🐚 ⚠️  Shell mode is OFF in this session."
+        echo "       You armed it in the session you just left; each session keeps its own"
+        echo "       shell/auto-accept, so this one starts safe. /s to enable it here, or"
+        echo "       /back to return to the session where it was on."
     elif [[ "$was_auto" == "ON" && "$AGENT_AUTOACCEPT" != "ON" ]]; then
-        echo "🛡️  Auto-accept is OFF in this session (/sY to re-arm)."
+        echo ""
+        echo "🛡️  Auto-accept is OFF in this session (switching sessions resets it)."
+        echo "       /sY to re-arm it here, or /back to return to the previous session."
     fi
 }
 # Clean-exit handler: flush command history AND the current session's settings.

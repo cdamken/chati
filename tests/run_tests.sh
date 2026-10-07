@@ -1045,7 +1045,8 @@ test_switch_announces_shell_drop() {
     # capturing the announcement via a file instead of a subshell.
     local out; reload_settings_announce > "$SANDBOX/announce_c" 2>&1; out=$(cat "$SANDBOX/announce_c")
     assert_eq "$AGENT_MODE" "OFF" "shell dropped after switch" \
-        && assert_match "$out" "Shell mode is OFF" "announced the drop"
+        && assert_match "$out" "Shell mode is OFF" "announced the drop" \
+        && assert_match "$out" "/back" "points at /back to return to the armed session"
 }
 run_test "session change announces Shell going OFF (#60)" test_switch_announces_shell_drop
 
