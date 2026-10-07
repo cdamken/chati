@@ -73,6 +73,92 @@ get_profile_settings() {
     esac
 }
 
+# ── OCR engine backends ──────────────────────────────────────────────────────
+# docr supports three engines, selectable with -e/--engine:
+#   tesseract  default; fast, offline, best for clean prose (multi-profile tuned)
+#   vision     Apple Vision via the bundled ocrvision binary (macOS only); best
+#              character accuracy on accents/photos, reads PDFs/HEIC directly
+#   olmocr2    a local Ollama vision-LLM; reconstructs tables/structure as text,
+#              best for dosage tables and layout-heavy scans (slower)
+OLMOCR_MODEL="${DOCR_OLMOCR_MODEL:-richardyoung/olmocr2:7b-q8}"
+OLMOCR_NUM_CTX="${DOCR_OLMOCR_NUM_CTX:-4096}"
+OLMOCR_HOST="${DOCR_OLMOCR_HOST:-http://localhost:11434}"
+# Keep the prompt short: olmocr2 returns HTTP 400 on long prompts.
+OLMOCR_PROMPT="${DOCR_OLMOCR_PROMPT:-Transcribe all text, keeping tables as rows.}"
+
+# Map a tesseract 3-letter language code to a BCP-47 tag for Apple Vision.
+# Unknown codes yield an empty string, letting Vision auto-detect.
+tess_to_bcp47() {
+    case "$1" in
+        eng) echo "en-US" ;;
+        deu|ger) echo "de-DE" ;;
+        fra|fre) echo "fr-FR" ;;
+        spa) echo "es-ES" ;;
+        por) echo "pt-BR" ;;
+        ita) echo "it-IT" ;;
+        nld|dut) echo "nl-NL" ;;
+        rus) echo "ru-RU" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Apple Vision engine. $1 image/pdf, $2 tesseract-lang, $3 output base (no ext).
+run_engine_vision() {
+    local image="$1" lang="$2" out_base="$3"
+    local bin; bin="$(dirname "$0")/ocrvision"
+    [[ -x "$bin" ]] || bin="ocrvision"
+    if [[ ! -x "$bin" ]] && ! command -v "$bin" >/dev/null 2>&1; then
+        echo "✗ Error: ocrvision binary not found (build: swiftc -O ocr_vision.swift -o ocrvision)" >&2
+        return 1
+    fi
+    local bcp; bcp="$(tess_to_bcp47 "$lang")"
+    # Pass the detected language first, English as a fallback for mixed documents.
+    if [[ -n "$bcp" && "$bcp" != "en-US" ]]; then
+        "$bin" "$image" "$bcp" en-US > "${out_base}.txt" 2>/dev/null
+    elif [[ -n "$bcp" ]]; then
+        "$bin" "$image" "$bcp" > "${out_base}.txt" 2>/dev/null
+    else
+        "$bin" "$image" > "${out_base}.txt" 2>/dev/null
+    fi
+}
+
+# olmocr2 vision-LLM via the Ollama HTTP API. Same signature as the Vision engine.
+run_engine_olmocr2() {
+    local image="$1" lang="$2" out_base="$3"
+    local dep
+    for dep in curl jq base64; do
+        command -v "$dep" >/dev/null 2>&1 || { echo "✗ Error: '$dep' required for the olmocr2 engine" >&2; return 1; }
+    done
+    local b64 body resp
+    b64="$(base64 -i "$image" 2>/dev/null | tr -d '\n')"
+    [[ -n "$b64" ]] || b64="$(base64 < "$image" 2>/dev/null | tr -d '\n')"
+    if [[ -z "$b64" ]]; then echo "✗ Error: could not read image '$image'" >&2; return 1; fi
+    body="$(jq -n --arg m "$OLMOCR_MODEL" --arg p "$OLMOCR_PROMPT" --arg img "$b64" \
+                  --argjson ctx "$OLMOCR_NUM_CTX" \
+                  '{model:$m, prompt:$p, images:[$img], stream:false, options:{num_ctx:$ctx}}')"
+    resp="$(printf '%s' "$body" | curl -s --max-time 300 "${OLMOCR_HOST}/api/generate" -d @- | jq -r '.response // empty')"
+    if [[ -z "$resp" ]]; then
+        echo "✗ Error: olmocr2 returned no text (is Ollama running and '$OLMOCR_MODEL' pulled?)" >&2
+        return 1
+    fi
+    printf '%s\n' "$resp" > "${out_base}.txt"
+}
+
+# Dispatch to the selected OCR engine. $1 image, $2 lang, $3 psm, $4 output base.
+# Writes "<out_base>.txt"; returns non-zero on failure.
+run_ocr_engine() {
+    local image="$1" lang="$2" psm="$3" out_base="$4"
+    case "$ENGINE" in
+        tesseract)
+            tesseract -l "$lang" --psm "$psm" --oem 3 -c preserve_interword_spaces=1 \
+                      "$image" "$out_base" 2>/dev/null
+            ;;
+        vision)  run_engine_vision  "$image" "$lang" "$out_base" ;;
+        olmocr2) run_engine_olmocr2 "$image" "$lang" "$out_base" ;;
+        *) echo "✗ Error: unknown engine '$ENGINE'" >&2; return 1 ;;
+    esac
+}
+
 # Function to find available AI chat command for word quality analysis
 find_chat_command() {
     for cmd in "ola" "fph" "fph2" "fnls"; do
@@ -629,16 +715,20 @@ test_first_page_quality() {
     return 0
 }
 
-# Check for required commands
-for cmd in tesseract magick; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo "Error: Required command '$cmd' not found."
-        echo "Please install:"
-        echo "  tesseract: brew install tesseract tesseract-lang"
-        echo "  magick: brew install imagemagick"
-        exit 1
-    fi
-done
+# Check for required commands (called from docr_main so the script can be sourced
+# by the test suite without side effects).
+check_deps() {
+    local cmd
+    for cmd in tesseract magick; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo "Error: Required command '$cmd' not found."
+            echo "Please install:"
+            echo "  tesseract: brew install tesseract tesseract-lang"
+            echo "  magick: brew install imagemagick"
+            exit 1
+        fi
+    done
+}
 
 # Supported file extensions
 IMAGE_EXTENSIONS="jpg|jpeg|png|tiff|bmp|gif|webp"
@@ -650,9 +740,28 @@ process_file() {
     local CURRENT_LANG="$2"
     local OCR_OUTPUTS="$3"
     OPTIMAL_PSM=6
-    
+
+    # Non-tesseract engines (vision, olmocr2) don't use tesseract's multi-profile
+    # DPI search — pick a rasterization DPI and skip the probing passes entirely.
+    if [[ "$ENGINE" != "tesseract" ]]; then
+        if [[ "$USER_SPECIFIED_QUALITY" == "true" ]]; then
+            case "$QUALITY_THRESHOLD" in
+                1) OPTIMAL_SETTINGS="$FAST_PROFILE" ;;
+                2) OPTIMAL_SETTINGS="$STANDARD_PROFILE" ;;
+                3) OPTIMAL_SETTINGS="$BALANCED_PROFILE" ;;
+                4) OPTIMAL_SETTINGS="$HIGH_PROFILE" ;;
+                5) OPTIMAL_SETTINGS="$ULTRA_PROFILE" ;;
+                *) OPTIMAL_SETTINGS="$STANDARD_PROFILE" ;;
+            esac
+        else
+            OPTIMAL_SETTINGS="$DEFAULT_DPI"
+        fi
+        DETECTED_LANGUAGE="$LANGUAGE"
+        if [[ "$VERBOSE_MODE" == "true" ]]; then
+            echo "🔌 Engine: $ENGINE (skipping tesseract profile search)"
+        fi
     # Check if both quality and language were manually specified
-    if [[ "$USER_SPECIFIED_QUALITY" == "true" && "$USER_SPECIFIED_LANGUAGE" == "true" ]]; then
+    elif [[ "$USER_SPECIFIED_QUALITY" == "true" && "$USER_SPECIFIED_LANGUAGE" == "true" ]]; then
         if [[ "$VERBOSE_MODE" == "true" ]]; then
             echo "⚡ Both quality (-q) and language (-l) specified - skipping all auto-detection for maximum speed"
             echo "📐 Using specified quality level: $QUALITY_THRESHOLD"
@@ -779,8 +888,9 @@ process_single_image() {
         fi
     fi
 
-    # Try to detect language if user didn't specify one
-    if [[ "$USER_SPECIFIED_LANGUAGE" != "true" ]]; then
+    # Try to detect language if user didn't specify one (tesseract engine only;
+    # Vision auto-detects and olmocr2 is language-agnostic).
+    if [[ "$USER_SPECIFIED_LANGUAGE" != "true" && "$ENGINE" == "tesseract" ]]; then
         if [[ "$VERBOSE_MODE" == "true" ]]; then
             echo -n "Analyzing '$(basename "$FILE")' for language... "
         fi
@@ -802,9 +912,9 @@ process_single_image() {
     local versioned_output=$(get_versioned_filename "$base_output_name" "txt")
     local output_base=$(echo "$versioned_output" | sed 's/\.txt$//')
     
-    # Perform OCR using tesseract with enhanced settings for better accuracy
-    tesseract -l "$CURRENT_LANG" --psm $OPTIMAL_PSM --oem 3 -c preserve_interword_spaces=1 "$TEMP_FILE" "$output_base"
-    # Check if tesseract executed successfully
+    # Perform OCR with the selected engine (tesseract | vision | olmocr2)
+    run_ocr_engine "$TEMP_FILE" "$CURRENT_LANG" "$OPTIMAL_PSM" "$output_base"
+    # Check if the engine executed successfully
     if [ $? -eq 0 ]; then
         output_file="$versioned_output"
         if [ -s "$output_file" ]; then
@@ -1015,6 +1125,16 @@ Usage: $script_name [options] <file1> [file2 ...]
 Process images and PDFs with OCR (Optical Character Recognition)
 
 Options:
+    -e, --engine <name>   OCR backend (default: tesseract):
+                         • tesseract = fast, offline, best for clean prose
+                         • vision    = Apple Vision (macOS); best accents/photos,
+                                       reads PDF/HEIC directly (needs ./ocrvision)
+                         • olmocr2   = local Ollama vision-LLM; reconstructs
+                                       tables/structure (slower; needs Ollama +
+                                       the olmocr2 model, curl, jq)
+    -o, --output <dir>    Write OCR files to <dir> instead of an OCR_OUTPUTS
+                         folder next to the input. Use this to keep artifacts
+                         out of an indexed corpus tree.
     -l, --lang <lang>     Specify OCR language (default: auto-detect via AI)
     -s, --script <script> Use specific writing system (e.g., Latin, Cyrillic)
     -q, --quality <1-5>   Select quality level (default: 2)
@@ -1066,6 +1186,8 @@ Examples:
     $script_name -ai contract.pdf             # OCR with AI summary (creates .txt + .ai.txt)
     $script_name -aio sensitive.pdf           # OCR with offline AI only (privacy mode)
     $script_name --script Latin *.jpg         # Process all JPGs with Latin script
+    $script_name -e vision scan.heic          # Apple Vision (accents, photos, HEIC)
+    $script_name -e olmocr2 -o /tmp/out t.pdf # Vision-LLM for tables, safe out dir
     $script_name --list                       # Show available languages
 
 Output:
@@ -1145,6 +1267,13 @@ get_versioned_filename() {
     echo "${base_file}(${counter}).${extension}"
 }
 
+# ── Entry point ──────────────────────────────────────────────────────────────
+# Wrapped in a function with a source guard so tests/test_docr.sh can source this
+# file to unit-test the pure helpers without executing the CLI.
+docr_main() {
+
+check_deps
+
 # Check if no arguments provided - show help and language list
 if [ $# -eq 0 ]; then
     show_lang_help
@@ -1161,6 +1290,9 @@ AI_OFFLINE_ONLY=""    # Track if user wants Ollama-only summarization
 VERBOSE_MODE=""       # Track if user wants verbose output
 DEFAULT_DPI="300"     # Standard OCR resolution
 TARGET_PATH=""
+ENGINE="tesseract"           # OCR backend: tesseract | vision | olmocr2
+OUTPUT_DIR=""                # Explicit output dir (-o); empty = next to input
+USER_SPECIFIED_OUTPUT=""     # Track if user set -o/--output
 
 # Process arguments
 while [[ $# -gt 0 ]]; do
@@ -1186,6 +1318,33 @@ while [[ $# -gt 0 ]]; do
                 shift 2
             else
                 echo "Error: Script name required after -s/--script"
+                exit 1
+            fi
+            ;;
+        -e|--engine)
+            if [ -n "$2" ]; then
+                case "$2" in
+                    tesseract|vision|olmocr2)
+                        ENGINE="$2"
+                        shift 2
+                        ;;
+                    *)
+                        echo "Error: Unknown engine '$2' (choose: tesseract, vision, olmocr2)"
+                        exit 1
+                        ;;
+                esac
+            else
+                echo "Error: Engine name required after -e/--engine"
+                exit 1
+            fi
+            ;;
+        -o|--output)
+            if [ -n "$2" ]; then
+                OUTPUT_DIR="$2"
+                USER_SPECIFIED_OUTPUT="true"
+                shift 2
+            else
+                echo "Error: Output directory required after -o/--output"
                 exit 1
             fi
             ;;
@@ -1287,6 +1446,13 @@ else
     FILES=("$TARGET_PATH")
 fi
 
+# An explicit -o/--output overrides the default (next-to-input) location. This
+# keeps OCR artifacts out of an indexed corpus tree by accident (see the RAG
+# corpus-pollution note in the docr README).
+if [[ "$USER_SPECIFIED_OUTPUT" == "true" ]]; then
+    OCR_OUTPUTS="$OUTPUT_DIR"
+fi
+
 # Create output directory
 mkdir -p "$OCR_OUTPUTS"
 
@@ -1371,3 +1537,10 @@ done
 
 # Success message
 echo "Done! OCR outputs saved in $OCR_OUTPUTS/"
+
+}
+
+# Run the CLI only when executed directly, not when sourced by the test suite.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    docr_main "$@"
+fi
