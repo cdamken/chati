@@ -21,6 +21,34 @@ carries its own internal version (shown by `chati --version`).
   warning, never whether to skip the prompt (`CHATI_AGENT_CONFIRM=all` is gone —
   confirming every command is the default).
 
+## [1.34.0] - 2026-10-07
+
+### Added
+- **`docr` now has a selectable OCR engine (`-e/--engine`).** `tesseract`
+  (default) keeps the old behavior; `vision` runs Apple Vision via the bundled
+  `ocrvision` binary (best character accuracy on accents/photos, reads PDF/HEIC
+  directly); `olmocr2` runs a local Ollama vision-LLM that reconstructs tables
+  and structure as text (for dosage tables and layout-heavy scans). Non-tesseract
+  engines skip tesseract's multi-profile DPI search, so they don't pay for probing
+  they can't use. `-o/--output <dir>` writes OCR files to a chosen directory
+  instead of an `OCR_OUTPUTS` folder next to the input, keeping artifacts out of
+  an indexed corpus tree.
+
+### Fixed
+- **Auto-OCR no longer hijacks a turn that merely mentions a folder.** Naming a
+  folder in a message with no read/OCR intent (a code review, or an output dir
+  like `~/Downloads`) expanded it to its image/PDF files, and the "too many to
+  OCR automatically" guard fired on the file count alone. The count guard now
+  lives inside the read/paths-intent branch, and a `no_folders` mode feeds the
+  "named but not OCR'd" hint only files named explicitly — so a folder mentioned
+  in passing is left alone.
+- **The per-session shell/auto-accept reset notice is now unmissable.** Changing
+  sessions resets `/s`/`/sY` to the new session's baseline (OFF) by design, but
+  the one-line notice was easy to miss, so users blamed whatever command they ran
+  next. The notice now names the cause (you armed it in the session you left) and
+  the fix (`/s` here, or `/back` to return to the armed session). No behavior
+  change.
+
 ## [1.33.1] - 2026-09-23
 
 ### Fixed
