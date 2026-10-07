@@ -1264,6 +1264,21 @@ test_detect_ocr_folder() {
 }
 run_test "detect_ocrable_in_msg expands a named folder" test_detect_ocr_folder
 
+test_detect_ocr_no_folders_flag() {
+    # With the no_folders flag, a named folder is NOT expanded — only files
+    # named explicitly count. Powers the auto-OCR "named but not OCR'd" hint,
+    # which must not fire just because a mentioned folder happens to hold images.
+    local d="$SANDBOX/codigo"; mkdir -p "$d"
+    : > "$d/diagrama.pdf"; : > "$d/captura.png"; : > "$d/main.py"
+    local r; r=$(detect_ocrable_in_msg "revisa el codigo en $d" no_folders)
+    assert_eq "$r" "" "folder not expanded when no_folders set"
+    # An explicitly named file still counts with the flag.
+    local f="$SANDBOX/recibo.pdf"; : > "$f"
+    r=$(detect_ocrable_in_msg "mira $f" no_folders)
+    assert_eq "$r" "$f" "explicit file still detected with no_folders"
+}
+run_test "detect_ocrable_in_msg honors the no_folders flag" test_detect_ocr_no_folders_flag
+
 test_msg_wants_ocr_intent() {
     msg_wants_ocr "Para leer los pdfs tiene que usar el docr, si puedes?" \
         || { echo "should detect read-a-pdf intent" >&2; return 1; }
@@ -1687,6 +1702,22 @@ test_compare_routes_before_ocr() {
         || { echo "compare branch missing / not first in auto-OCR block" >&2; return 1; }
 }
 run_test "auto-OCR routes compare-intent to metadata, not OCR" test_compare_routes_before_ocr
+
+test_too_many_ocr_is_intent_gated() {
+    # Bug: naming a folder (e.g. for a code review, or an output dir like
+    # ~/Downloads) expanded to its image/PDF files and the ">max" guard fired
+    # the "too many to OCR" banner on count alone, hijacking the turn. The
+    # count check must live INSIDE the read/paths-intent branch, never standalone.
+    local block; block=$(awk '/Auto-OCR \(#21\)/,/No path in THIS message/' "$PROJECT_DIR/chati")
+    # The too-many banner must not sit in a bare "elif (( ... > _ocr_max ))".
+    if printf '%s' "$block" | grep -Eq 'elif \(\( \$\{#_ocr_files\[@\]\} > _ocr_max \)\)'; then
+        echo "'too many' guard still fires on count alone (no intent gate)" >&2; return 1
+    fi
+    # And the banner must appear after an OCR-intent condition in the chain.
+    printf '%s' "$block" | grep -q 'too many to OCR automatically' \
+        || { echo "too-many banner missing" >&2; return 1; }
+}
+run_test "auto-OCR 'too many' banner is gated by read intent" test_too_many_ocr_is_intent_gated
 
 #==============================================================================
 # PHASE 3 — Integration (needs Ollama)

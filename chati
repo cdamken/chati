@@ -1032,7 +1032,7 @@ ocr_files_to_text() {
 # OCR-able files are returned — a bare mention of ".pdf" with no such file
 # matches nothing, so normal prose never triggers OCR. Powers auto-OCR (#21).
 detect_ocrable_in_msg() {
-    local msg="$1" sentinel=$'\x01' tok p
+    local msg="$1" no_folders="${2:-}" sentinel=$'\x01' tok p
     msg="${msg//\\ /$sentinel}"           # protect escaped spaces before splitting
     for tok in $msg; do
         tok="${tok//$sentinel/ }"         # restore the spaces
@@ -1042,9 +1042,12 @@ detect_ocrable_in_msg() {
         p=$(expand_path "$tok")
         if [[ -f "$p" ]] && ocr_is_ocrable "$p"; then
             printf '%s\n' "$p"
-        elif [[ -d "$p" ]]; then
+        elif [[ -d "$p" && -z "$no_folders" ]]; then
             # A named folder → the image/PDF files inside it (same collector /ocr
-            # uses), so "lee los pdfs de ~/Downloads/facturas" works too.
+            # uses), so "lee los pdfs de ~/Downloads/facturas" works too. Pass a
+            # second arg (no_folders) to suppress this — the auto-OCR router uses
+            # it so a folder mentioned for a non-OCR reason (a code review, an
+            # output dir) is not silently expanded into an OCR batch.
             ocr_collect_files "$p"
         fi
     done
@@ -1868,6 +1871,11 @@ while true; do
         _named_files=()
         while IFS= read -r _f; do [[ -n "$_f" ]] && _named_files+=("$_f"); done \
             < <(detect_files_in_msg "$msg")
+        # Image/PDF files named EXPLICITLY (not via folder expansion). A folder
+        # mentioned for a non-OCR reason must not drag its contents into OCR.
+        _ocr_explicit=()
+        while IFS= read -r _f; do [[ -n "$_f" ]] && _ocr_explicit+=("$_f"); done \
+            < <(detect_ocrable_in_msg "$msg" no_folders)
         _ocr_max="${CHATI_AUTO_OCR_MAX:-8}"
         if msg_wants_compare "$msg" && (( ${#_named_files[@]} >= 2 )); then
             # Compare / dedupe / size / date → metadata (+ text diff), NEVER
@@ -1889,25 +1897,31 @@ while true; do
                 fi
             fi
             msg="${msg}${_nl}${_nl}${_cmp}"
-        elif (( ${#_ocr_files[@]} > _ocr_max )); then
-            # docr is slow (~a minute per file); don't silently OCR a huge
-            # folder. Tell the user to opt in explicitly.
-            echo "📎 Found ${#_ocr_files[@]} image/PDF files — too many to OCR automatically."
-            echo "   Run  /ocr <file|folder|glob>  to read them all, or name specific files."
         elif (( ${#_ocr_files[@]} )) && { msg_wants_ocr "$msg" || msg_is_just_paths "$msg" "${_ocr_files[@]}"; }; then
             # OCR only when you actually want the text: a read/analyze verb, or
-            # a bare file drop (nothing but the path).
-            echo "📎 Detected ${#_ocr_files[@]} image/PDF file(s) — reading with docr…"
-            _ocr_text=$(ocr_files_to_text "${_ocr_files[@]}")
-            if [[ -n "$_ocr_text" ]]; then
-                msg="${msg}${_nl}${_nl}[Text extracted from the attached file(s) via OCR — use it to answer]:${_ocr_text}"
+            # a bare file drop (nothing but the path). The count guard lives HERE,
+            # not standalone — so merely mentioning a folder (for a code review,
+            # or as an output dir) never fires the "too many" banner on its own.
+            if (( ${#_ocr_files[@]} > _ocr_max )); then
+                # docr is slow (~a minute per file); don't silently OCR a huge
+                # folder. Tell the user to opt in explicitly.
+                echo "📎 Found ${#_ocr_files[@]} image/PDF files — too many to OCR automatically."
+                echo "   Run  /ocr <file|folder|glob>  to read them all, or name specific files."
+            else
+                echo "📎 Detected ${#_ocr_files[@]} image/PDF file(s) — reading with docr…"
+                _ocr_text=$(ocr_files_to_text "${_ocr_files[@]}")
+                if [[ -n "$_ocr_text" ]]; then
+                    msg="${msg}${_nl}${_nl}[Text extracted from the attached file(s) via OCR — use it to answer]:${_ocr_text}"
+                fi
             fi
-        elif (( ${#_ocr_files[@]} )); then
-            # Files named, but no read/compare intent — don't force OCR. Show
-            # what they are and offer the explicit ways in.
-            echo "📎 ${#_ocr_files[@]} image/PDF file(s) named — not OCR'd (OCR is only when you need the exact text)."
+        elif (( ${#_ocr_explicit[@]} )); then
+            # Image/PDF files named EXPLICITLY, but no read/compare intent — don't
+            # force OCR. Show what they are and offer the explicit ways in. Uses
+            # the explicit list (not folder-expanded) so a folder mentioned in
+            # passing doesn't dump its contents here either.
+            echo "📎 ${#_ocr_explicit[@]} image/PDF file(s) named — not OCR'd (OCR is only when you need the exact text)."
             echo "   • /ocr <file>  reads the text   • ask to \"compare\" for size/date/duplicates"
-            msg="${msg}${_nl}${_nl}[Files named (not read):${_nl}$(files_metadata_summary "${_ocr_files[@]}")]"
+            msg="${msg}${_nl}${_nl}[Files named (not read):${_nl}$(files_metadata_summary "${_ocr_explicit[@]}")]"
         elif msg_wants_ocr "$msg"; then
             # No path in THIS message, but you asked to read a document. First
             # reuse a path/folder you named earlier in this session, so you
