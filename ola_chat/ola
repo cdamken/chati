@@ -113,9 +113,14 @@ SUMMARY_CONTENT=""
 # through to the capture when the line isn't JSON.
 PAYLOAD_FILE=$(mktemp)
 trap 'rm -f "$PAYLOAD_FILE"' EXIT
-# Show the model's reasoning when OLA_THINK=1 (chati's /think). Adds
-# "think": true so Ollama returns the .message.thinking channel; off by
-# default, so the payload is byte-for-byte unchanged for a normal turn.
+# Control the model's reasoning. "think": true (chati's /think) returns the
+# .message.thinking channel; "think": false actively DISABLES reasoning so the
+# whole answer lands in .message.content. We always send the flag explicitly —
+# omitting it lets a reasoning model (e.g. gemma4:26b) think by default and
+# split its output, which, under a tight num_predict/long context, can spend the
+# whole budget thinking and return EMPTY content (chati then errors with
+# "Empty response"). Sending think:false makes "Thinking: OFF" actually off at
+# the model, not just hidden. Harmless on non-reasoning models (they ignore it).
 OLA_THINK_BOOL=false; [[ "${OLA_THINK:-0}" == 1 ]] && OLA_THINK_BOOL=true
 tail -n "${SLIDING_WINDOW:-20}" "$MESSAGES_FILE" 2>/dev/null | jq -R -s \
     --arg model "$OLLAMA_MODEL" \
@@ -137,8 +142,8 @@ tail -n "${SLIDING_WINDOW:-20}" "$MESSAGES_FILE" 2>/dev/null | jq -R -s \
          (if $extra   != "" then [{role:"system", content:$extra}] else [] end) +
          $hist),
       stream: true,
-      options: { num_predict: 4096 } }
-    + (if $think then {think: true} else {} end)' > "$PAYLOAD_FILE"
+      options: { num_predict: 4096 },
+      think: $think }' > "$PAYLOAD_FILE"
 
 # Reset side-channel for chati to consume after the stream.
 : > "$LAST_RESPONSE_FILE"

@@ -21,6 +21,20 @@ carries its own internal version (shown by `chati --version`).
   warning, never whether to skip the prompt (`CHATI_AGENT_CONFIRM=all` is gone —
   confirming every command is the default).
 
+## [1.34.1] - 2026-10-14
+
+### Fixed
+- **"Thinking: OFF" now actually disables the model's reasoning, fixing an
+  intermittent "Empty response" with reasoning models (e.g. `gemma4:26b`).** A
+  reasoning model thinks by default and splits its output into a `thinking`
+  channel plus `content`; `ola` reads only `content`. With Thinking OFF the
+  payload previously *omitted* the `think` flag, so the model still reasoned and,
+  under a tight `num_predict` or a long context, could spend its whole budget
+  thinking and return empty content — which chati surfaced as
+  `Empty response from <model>. The model may be overloaded or misconfigured.`
+  `ola` now always sends `think` explicitly (`false` when OFF), so the answer
+  lands in `content`. Harmless on non-reasoning models. (#86)
+
 ## [1.34.0] - 2026-10-07
 
 ### Added

@@ -1436,6 +1436,30 @@ test_json_has_thinking() {
 }
 run_test "_json_has_thinking detects the thinking capability from /api/show JSON" test_json_has_thinking
 
+# --- ola always sends the think flag (#86) ---
+# A reasoning model (gemma4:26b) thinks by DEFAULT and splits its output into a
+# thinking channel + content. ola reads only content, so if "think" is omitted
+# the model can spend its whole num_predict budget thinking and return EMPTY
+# content → chati's "Empty response" error. ola must send think explicitly:
+# false when THINK is OFF (so the answer lands in content), true for /think.
+test_ola_payload_always_sends_think() {
+    local ola="$PROJECT_DIR/ola_chat/ola" prog
+    # Extract ola's real payload jq program (between the argjson-think quote and
+    # the redirect) so this stays faithful if the program is edited.
+    prog=$(awk '/--argjson think /{grab=1} grab{print} /> "\$PAYLOAD_FILE"/{exit}' "$ola" \
+           | sed -E '1 s/.*--argjson think "\$OLA_THINK_BOOL" .//' \
+           | sed -E 's/. > "\$PAYLOAD_FILE".*//')
+    [[ -n "$prog" ]] || { echo "could not extract ola payload jq program" >&2; return 1; }
+    local off on
+    off=$(printf '%s\n' '{"role":"user","content":"hi"}' \
+          | jq -R -s --arg model m --arg prompt "" --arg summary "" --arg extra "" --argjson think false "$prog" | jq -c '.think')
+    on=$(printf '%s\n' '{"role":"user","content":"hi"}' \
+          | jq -R -s --arg model m --arg prompt "" --arg summary "" --arg extra "" --argjson think true "$prog" | jq -c '.think')
+    assert_eq "$off" "false" "think:false sent when Thinking is OFF" \
+        && assert_eq "$on" "true" "think:true sent for /think"
+}
+run_test "ola sends think:false when OFF so reasoning models don't return empty (#86)" test_ola_payload_always_sends_think
+
 # --- extract_exec_cmd ---
 test_exec_simple() {
     local r; r=$(extract_exec_cmd "[EXEC: ls -la ~]")
