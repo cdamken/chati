@@ -1691,7 +1691,13 @@ while true; do
                         WEB_MODE="OFF"
                         echo "🚫 Web search unavailable:"
                         echo "$web_reason"
-                        echo "   Staying OFF. Set SEARXNG_URLS (or run a local SearXNG); see installer/SEARXNG_SETUP.md."
+                        # If a local endpoint is configured but still down (auto-start
+                        # didn't take, e.g. SearXNG isn't installed), name the command.
+                        if _searxng_local_endpoint >/dev/null 2>&1; then
+                            echo "   Start your local SearXNG:  ailocal start searxng   (then /web again)"
+                        else
+                            echo "   Staying OFF. Set SEARXNG_URLS (or run a local SearXNG); see installer/SEARXNG_SETUP.md."
+                        fi
                     fi
                 fi ;;
             /think)
