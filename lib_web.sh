@@ -263,6 +263,47 @@ web_search_available() {
     return 1
 }
 
+# Echo the FIRST configured endpoint that lives on this machine (localhost /
+# 127.0.0.1 / ::1), else nothing. Only a local SearXNG can be started from
+# here; a remote one (the cloud server) is out of our hands. Pure (no I/O), so
+# it is unit-testable from SEARXNG_URLS alone.
+_searxng_local_endpoint() {
+    local u host
+    while IFS= read -r u; do
+        host=$(printf '%s' "$u" | sed -E 's#^[a-z]+://##; s#/.*$##; s#:[0-9]+$##')
+        case "$host" in
+            localhost|127.0.0.1|::1|0.0.0.0) printf '%s\n' "$u"; return 0 ;;
+        esac
+    done < <(searxng_endpoints)
+    return 1
+}
+
+# If a LOCAL SearXNG endpoint is configured but not answering, start it via
+# ailocal (which owns the granian/venv launch) and wait for it to come up. Only
+# acts on a local endpoint; with a remote-only config there is nothing to start.
+# Returns 0 when a local endpoint is up afterward, 1 otherwise (no local
+# endpoint, no ailocal, or it did not come up in time). Mirrors how chati
+# auto-starts a local Ollama.
+ensure_searxng_running() {
+    local localurl; localurl=$(_searxng_local_endpoint) || return 1
+    # Already up? nothing to do.
+    curl -fsS --max-time 3 "$localurl/search?q=ping&format=json" >/dev/null 2>&1 && return 0
+    local ail="${CHATI_DIR:-$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/ai_local/ailocal"
+    [[ -x "$ail" ]] || return 1
+    echo "🔎 Local SearXNG ($localurl) is down — starting it..." >&2
+    "$ail" start searxng >/dev/null 2>&1
+    local i
+    for i in $(seq 1 "${SEARXNG_START_WAIT:-15}"); do
+        sleep 1
+        if curl -fsS --max-time 3 "$localurl/search?q=ping&format=json" >/dev/null 2>&1; then
+            echo "   ✅ SearXNG is up." >&2
+            return 0
+        fi
+    done
+    echo "   ⚠️  SearXNG didn't come up in time — check: ailocal status" >&2
+    return 1
+}
+
 # ONE query pass over SearXNG across the configured endpoints with RANDOM
 # round-robin + failover + per-endpoint rate-limit cooldown. Prints formatted
 # results, "No results found.", or an "Error: ..." line. Always returns 0 —

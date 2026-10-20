@@ -1675,8 +1675,14 @@ while true; do
                     # SearXNG is external — only enable /web if it actually
                     # answers, so we never pretend to have internet.
                     echo "🌐 Checking web search backend(s)..." >&2
-                    web_reason=$(web_search_available 2>&1)
-                    if [[ $? -eq 0 ]]; then
+                    web_reason=$(web_search_available 2>&1); web_rc=$?
+                    # Backend down but a LOCAL SearXNG is configured? Start it and
+                    # re-check once, instead of refusing /web (the remote may just
+                    # be off). No-op for a remote-only config.
+                    if (( web_rc != 0 )) && ensure_searxng_running; then
+                        web_reason=$(web_search_available 2>&1); web_rc=$?
+                    fi
+                    if (( web_rc == 0 )); then
                         WEB_MODE="ON"
                         echo "🌐 Web Search: ON"
                         # Show which endpoints are live (round-robins over them).

@@ -763,6 +763,20 @@ test_searxng_auth_config_writes_600() {
 }
 run_test "searxng_auth_config writes a 0600 creds file (off argv)" test_searxng_auth_config_writes_600
 
+test_searxng_local_endpoint_detection() {
+    # Powers the /web auto-start: only a localhost endpoint can be started here.
+    local r
+    r=$(SEARXNG_URLS="https://cloud.damken.com/searx" _searxng_local_endpoint)
+    assert_eq "$r" "" "remote-only config → nothing to start" || return 1
+    r=$(SEARXNG_URLS="https://cloud.damken.com/searx, http://localhost:8890" _searxng_local_endpoint)
+    assert_eq "$r" "http://localhost:8890" "picks the localhost endpoint" || return 1
+    r=$(SEARXNG_URLS="http://127.0.0.1:8890/" _searxng_local_endpoint)
+    assert_eq "$r" "http://127.0.0.1:8890" "127.0.0.1 counts as local (slash trimmed)" || return 1
+    r=$(SEARXNG_URLS="http://searx.example.com:8890" _searxng_local_endpoint)
+    assert_eq "$r" "" "a remote host that merely uses the local port is not local"
+}
+run_test "_searxng_local_endpoint spots a startable local SearXNG" test_searxng_local_endpoint_detection
+
 test_searxng_auth_config_empty_without_creds() {
     local f; f=$(SEARXNG_USER="" SEARXNG_PASS="" searxng_auth_config)
     assert_eq "$f" "" "no creds → no config file"
