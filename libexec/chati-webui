@@ -1,10 +1,162 @@
 #!/bin/bash
-# summary: arranca/detiene/reinicia OpenWebUI (envuelve ai_local/ailocal)
+# summary: prende lo que OpenWebUI necesita (Ollama) y abre OpenWebUI
+#==============================================================================
+# chati webui — start the OpenWebUI stack.
+#
+# OpenWebUI needs the engine, so this starts Ollama if it's down, then OpenWebUI
+# itself, and wires the UI's web search to the local SearXNG when it's present.
+# It does NOT force-start SearXNG: that's optional and comes up on demand (/web),
+# and a broken/slow local SearXNG shouldn't hang bringing the UI up. It never
+# stops anything — use `chati stop` to turn it all off, `chati status` to look.
+#
+# Carries the hard-won OpenWebUI fixes verbatim: external DATA_DIR (so data
+# survives a --force reinstall), a secret key kept outside the repo, the
+# WEBUI_AUTH login-less marker (so a login-less DB stays login-less across
+# reboots without wedging a pre-existing DB), and wiring the UI's web search to
+# the local SearXNG. Install/upgrade of OpenWebUI lives in setup.sh, not here.
+#==============================================================================
 set -o pipefail
+
 _src="${BASH_SOURCE[0]}"
-while [[ -L "$_src" ]]; do _dir="$(cd -P "$(dirname "$_src")" && pwd)"; _src="$(readlink "$_src")"; [[ "$_src" != /* ]] && _src="$_dir/$_src"; done
+while [[ -L "$_src" ]]; do
+    _dir="$(cd -P "$(dirname "$_src")" && pwd)"; _src="$(readlink "$_src")"
+    [[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
 CHATI_DIR="$(cd -P "$(dirname "$_src")/.." && pwd)"
 unset _src _dir
 # shellcheck source=/dev/null
 source "$CHATI_DIR/chati-common.sh"
-chati_service_cmd webui "$@"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Usage: chati webui"
+    echo "Start the OpenWebUI stack (Ollama + SearXNG-if-installed + OpenWebUI)."
+    echo "Stop everything with 'chati stop'; see state with 'chati status'."
+    exit 0
+fi
+
+# --- OpenWebUI config ---
+OPENWEBUI_DIR="$HOME/openwebui"
+OPENWEBUI_DATA_DIR="$OPENWEBUI_DIR/data"
+OPENWEBUI_VENV="${OPENWEBUI_VENV:-$OPENWEBUI_DIR/.venv}"
+WEBUI_SECRET_KEY_FILE="$OPENWEBUI_DIR/.webui_secret_key"
+WEBUI_PORT="${WEBUI_PORT:-8888}"
+WEBUI_HOST="${WEBUI_HOST:-127.0.0.1}"
+WEBUI_START_TIMEOUT="${WEBUI_START_TIMEOUT:-180}"
+OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
+
+check_webui_status() {
+    curl -s --max-time 3 "http://$WEBUI_HOST:$WEBUI_PORT/health" >/dev/null 2>&1
+}
+
+# Load the secret key, generating one (0600) if missing. Kept in a file OUTSIDE
+# the repo — a committed secret lives in git history forever.
+load_secret_key() {
+    if [[ ! -s "$WEBUI_SECRET_KEY_FILE" ]]; then
+        echo "Generating a new OpenWebUI secret key (existing sessions will need to log in again)." >&2
+        mkdir -p "$OPENWEBUI_DIR"
+        ( umask 077; openssl rand -hex 32 > "$WEBUI_SECRET_KEY_FILE" ) \
+            || { echo "Error: could not generate secret key (is openssl available?)" >&2; exit 1; }
+    fi
+    WEBUI_SECRET_KEY=$(cat "$WEBUI_SECRET_KEY_FILE")
+}
+
+# Locate the LIVE OpenWebUI database (external data dir, with a venv fallback
+# for installs from before the external-DATA_DIR fix).
+find_webui_db() {
+    if [[ -f "$OPENWEBUI_DATA_DIR/webui.db" ]]; then
+        echo "$OPENWEBUI_DATA_DIR/webui.db"; return 0
+    fi
+    find "$OPENWEBUI_VENV" -name "webui.db" -path "*open_webui/data*" 2>/dev/null | head -n 1
+}
+
+# Decide (and export) WEBUI_AUTH for this boot, and keep the choice durable via a
+# marker beside the DB. Precedence: explicit WEBUI_AUTH wins; else a fresh DB is
+# login-less (and remembered); else our own marker keeps it login-less; else a
+# pre-existing DB keeps its own auth. $1 = live db path ("" if none), $2 = marker.
+resolve_webui_auth() {
+    local webui_db="$1" marker="$2" marker_dir
+    marker_dir="$(dirname "$marker")"
+    if [[ -n "${WEBUI_AUTH:-}" ]]; then
+        export WEBUI_AUTH
+        if [[ "$WEBUI_AUTH" == "False" ]]; then
+            mkdir -p "$marker_dir" 2>/dev/null; : > "$marker" 2>/dev/null
+        else
+            rm -f "$marker" 2>/dev/null
+        fi
+    elif [[ -z "$webui_db" ]]; then
+        export WEBUI_AUTH="False"
+        mkdir -p "$marker_dir" 2>/dev/null; : > "$marker" 2>/dev/null
+    elif [[ -f "$marker" ]]; then
+        export WEBUI_AUTH="False"
+    else
+        echo "ℹ️  Existing OpenWebUI database detected — keeping its own auth setting." >&2
+        echo "    (Force login-less with WEBUI_AUTH=False, or wipe it: ./setup.sh --remove-webui)" >&2
+    fi
+}
+
+start_webui() {
+    if chati_svc_running "$CHATI_WEBUI_PROC"; then
+        echo "OpenWebUI is already running at http://$WEBUI_HOST:$WEBUI_PORT"
+        return 0
+    fi
+    if [[ ! -x "$OPENWEBUI_VENV/bin/open-webui" ]]; then
+        echo "Error: OpenWebUI isn't installed ($OPENWEBUI_VENV)." >&2
+        echo "Install it with:  ./setup.sh --force-webui" >&2
+        return 1
+    fi
+
+    mkdir -p "$OPENWEBUI_DATA_DIR"
+    load_secret_key
+    # DATA_DIR is the var OpenWebUI actually reads; without it the data lives
+    # INSIDE the venv and dies on every --force reinstall (the 2026-06-12
+    # data-loss incident).
+    export DATA_DIR="$OPENWEBUI_DATA_DIR"
+    export WEBUI_SECRET_KEY OLLAMA_BASE_URL
+
+    # Login-less by default only on a FRESH DB; a pre-existing DB keeps its own
+    # auth (forcing False onto a DB with accounts wedges the UI, #6). A
+    # login-less DB we made stays login-less across reboots (the marker).
+    resolve_webui_auth "$(find_webui_db)" "$OPENWEBUI_DATA_DIR/.loginless"
+
+    # Wire the UI's built-in web search to the local SearXNG when installed.
+    # ENABLE_PERSISTENT_CONFIG=False makes these env values authoritative on
+    # every boot (not just the first), so they apply to an existing DB too.
+    if chati_searxng_installed; then
+        local searx_query="http://$CHATI_SEARXNG_HOST:$CHATI_SEARXNG_PORT/search?q=<query>"
+        export ENABLE_PERSISTENT_CONFIG="${ENABLE_PERSISTENT_CONFIG:-False}"
+        export ENABLE_WEB_SEARCH="${ENABLE_WEB_SEARCH:-true}"
+        export WEB_SEARCH_ENGINE="${WEB_SEARCH_ENGINE:-searxng}"
+        export SEARXNG_QUERY_URL="${SEARXNG_QUERY_URL:-$searx_query}"
+        export ENABLE_RAG_WEB_SEARCH="${ENABLE_RAG_WEB_SEARCH:-true}"
+        export RAG_WEB_SEARCH_ENGINE="${RAG_WEB_SEARCH_ENGINE:-searxng}"
+    fi
+
+    echo "Starting OpenWebUI..." >&2
+    # </dev/null so a piped/non-interactive caller (scripts, agents) sees EOF
+    # and doesn't hang even though the service is up.
+    nohup "$OPENWEBUI_VENV/bin/open-webui" serve --host "$WEBUI_HOST" --port "$WEBUI_PORT" \
+        </dev/null > "$CHATI_LOG_DIR/webui.log" 2>&1 &
+
+    printf 'Waiting for OpenWebUI to start (up to %ss)' "$WEBUI_START_TIMEOUT" >&2
+    local i
+    for (( i = 0; i < WEBUI_START_TIMEOUT; i++ )); do
+        if check_webui_status; then
+            echo " [OK]" >&2
+            echo "OpenWebUI started at http://$WEBUI_HOST:$WEBUI_PORT"
+            [[ -z "${CHATI_NO_OPEN:-}" ]] && command -v open >/dev/null && open "http://$WEBUI_HOST:$WEBUI_PORT"
+            return 0
+        fi
+        sleep 1
+        printf '.' >&2
+    done
+    echo " [TIMEOUT]" >&2
+    echo "OpenWebUI health check timed out after ${WEBUI_START_TIMEOUT}s. First boot after an upgrade can be slow (DB migration) — check $CHATI_LOG_DIR/webui.log; it may still come up." >&2
+    return 1
+}
+
+mkdir -p "$CHATI_LOG_DIR"
+
+# Bring up the engine OpenWebUI needs, then OpenWebUI itself. SearXNG is left to
+# start on demand (/web); it's only wired into the UI's search above if present.
+chati_start_ollama
+start_webui

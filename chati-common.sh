@@ -104,8 +104,64 @@ CHATI_WEBUI_PROC="$CHATI_WEBUI_VENV/bin/open-webui serve"
 # shellcheck disable=SC2034  # used by libexec/chati-status and chati-stop
 CHATI_SEARXNG_PROC='granian.*searx\.webapp'
 
+# --- SearXNG local instance paths (optional 2nd web-search endpoint) ---
+CHATI_SEARXNG_DIR="${SEARXNG_DIR:-$HOME/searxng}"
+CHATI_SEARXNG_VENV="$CHATI_SEARXNG_DIR/.venv"
+CHATI_SEARXNG_SRC="$CHATI_SEARXNG_DIR/src"
+CHATI_SEARXNG_SETTINGS="$CHATI_SEARXNG_DIR/settings.yml"
+CHATI_SEARXNG_HOST="${SEARXNG_LOCAL_HOST:-127.0.0.1}"
+CHATI_SEARXNG_PORT="${SEARXNG_LOCAL_PORT:-8890}"
+
 # Is a service running? $1 = its `pgrep -f` pattern.
 chati_svc_running() { pgrep -f "$1" >/dev/null 2>&1; }
+
+# Start the Ollama engine if it isn't already up. Ollama has no standalone
+# start command by design (it comes up when you launch chati); this is the one
+# place that logic lives, shared by chati's own startup and `chati webui`.
+# Waits for the HTTP API (not just the process) so callers can use it right away.
+chati_start_ollama() {
+    if chati_svc_running "$CHATI_OLLAMA_PROC"; then echo "Ollama is already running"; return 0; fi
+    command -v ollama >/dev/null 2>&1 || { echo "ollama not found in PATH (brew install ollama)" >&2; return 1; }
+    mkdir -p "$CHATI_LOG_DIR"
+    # Apple Silicon perf tuning (Homebrew ollama's recommended flags): flash
+    # attention + q8 KV cache. Override by exporting these first.
+    export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+    export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
+    # </dev/null so a piped/non-interactive caller doesn't hold stdin open.
+    nohup ollama serve </dev/null >"$CHATI_LOG_DIR/ollama.log" 2>&1 &
+    local i
+    for (( i = 0; i < 10; i++ )); do
+        sleep 1
+        curl -fsS --max-time 2 "$(chati_ollama_api)/api/version" >/dev/null 2>&1 \
+            && { echo "Ollama started"; return 0; }
+    done
+    echo "Ollama didn't become ready in 10s (see $CHATI_LOG_DIR/ollama.log)" >&2
+    return 1
+}
+
+# Is a local SearXNG installed (venv + settings present)?
+chati_searxng_installed() { [[ -x "$CHATI_SEARXNG_VENV/bin/granian" && -f "$CHATI_SEARXNG_SETTINGS" ]]; }
+
+# Start the local SearXNG (granian) if installed and not already up. Optional:
+# a no-op (returns 0) when SearXNG isn't installed locally.
+chati_start_searxng() {
+    chati_searxng_installed || { echo "SearXNG not installed locally (installer/install_searxng.sh)"; return 0; }
+    if chati_svc_running "$CHATI_SEARXNG_PROC"; then echo "SearXNG is already running"; return 0; fi
+    mkdir -p "$CHATI_LOG_DIR"
+    ( cd "$CHATI_SEARXNG_SRC" && \
+      SEARXNG_SETTINGS_PATH="$CHATI_SEARXNG_SETTINGS" PYTHONPATH="$CHATI_SEARXNG_SRC" \
+      nohup "$CHATI_SEARXNG_VENV/bin/granian" --interface wsgi \
+          --host "$CHATI_SEARXNG_HOST" --port "$CHATI_SEARXNG_PORT" \
+          searx.webapp:app </dev/null >"$CHATI_LOG_DIR/searxng.log" 2>&1 & )
+    local i
+    for (( i = 0; i < 20; i++ )); do
+        curl -s --max-time 2 -o /dev/null "http://$CHATI_SEARXNG_HOST:$CHATI_SEARXNG_PORT/healthz" \
+            && { echo "SearXNG started at http://$CHATI_SEARXNG_HOST:$CHATI_SEARXNG_PORT"; return 0; }
+        sleep 1
+    done
+    echo "SearXNG health check timed out (see $CHATI_LOG_DIR/searxng.log)" >&2
+    return 1
+}
 
 # Stop a service: SIGTERM, wait up to grace seconds for it to actually exit
 # (OpenWebUI/uvicorn and SearXNG/granian take a few seconds, and touching their
