@@ -5,7 +5,6 @@ This directory contains tools for document processing and OCR (Optical Character
 ## Main Tools
 
 - **`docr`** - Main document OCR tool with multi-language support and automatic quality profile detection
-- **`GraphPdfOcr.groovy`** - Groovy-based OCR processor (reference implementation)
 
 ## Usage
 

@@ -141,7 +141,7 @@ Options (add any of these to the command above):
 | `lynx` | Terminal web browser for URL fetching (`/url`) |
 | `imagemagick` | Image preprocessing for OCR (`magick` command) |
 | `tesseract` / `tesseract-lang` | OCR engine + language packs |
-| `groovy` / `ghostscript` | `docr`'s PDF graphics engine (OCR pipeline) |
+| `ghostscript` / `poppler` | `docr`'s PDF rasterizing engine (OCR pipeline) |
 | `uv` / `python@3.11` | **OpenWebUI only** — the chat stack itself is pure bash + jq + curl |
 
 > macOS built-ins used by the scripts (`say`, `open`, `pgrep`, `pkill`, `nohup`) require no installation.
