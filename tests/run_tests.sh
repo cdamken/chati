@@ -1563,26 +1563,6 @@ test_doctor_line_format() {
 }
 run_test "chati-doctor _doctor_line formats status rows" test_doctor_line_format
 
-test_service_cmd_guards() {
-    # Validate the non-exec branches (a valid action would exec ailocal and
-    # actually start/stop a service, so we only test the guards here).
-    local save="$CHATI_DIR"
-    local bad; ( CHATI_DIR="$PWD"; chati_service_cmd webui frobnicate ) >/dev/null 2>&1; bad=$?
-    # Extra args after a valid action are rejected, not dropped (needs ailocal
-    # present so we exercise the extra-arg guard, not the missing-dep branch).
-    local e; e=$(mktemp -d); mkdir -p "$e/ai_local"
-    printf '#!/bin/bash\nexit 0\n' > "$e/ai_local/ailocal"; chmod +x "$e/ai_local/ailocal"
-    local extra; ( CHATI_DIR="$e"; chati_service_cmd webui start --port 9999 ) >/dev/null 2>&1; extra=$?
-    rm -rf "$e"
-    local d; d=$(mktemp -d)   # no ailocal inside → missing-dep
-    local miss; ( CHATI_DIR="$d"; chati_service_cmd webui start ) >/dev/null 2>&1; miss=$?
-    rm -rf "$d"; CHATI_DIR="$save"
-    assert_eq "$bad" "2" "invalid action -> exit 2 (usage)" \
-        && assert_eq "$extra" "2" "extra args after action -> exit 2 (usage)" \
-        && assert_eq "$miss" "3" "missing ailocal -> exit 3 (dependency)"
-}
-run_test "chati_service_cmd guards invalid action and missing ailocal" test_service_cmd_guards
-
 test_svc_running_and_stop() {
     # Exercise chati_svc_running / chati_svc_stop against a THROWAWAY process of
     # our own (a sleep with a unique duration as the marker) — never a real

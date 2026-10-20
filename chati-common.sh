@@ -61,28 +61,6 @@ chati_load_env() {
 # The configured Ollama base URL (default local).
 chati_ollama_api() { printf '%s' "${OLLAMA_API:-http://localhost:11434}"; }
 
-# Pass a start/stop/restart/status action through to ai_local/ailocal for one
-# service target (webui|searxng|ollama). Powers the thin chati-<service>
-# wrappers, so the start/stop logic stays in ailocal (not rewritten) behind the
-# single `chati` front door. `exec`s ailocal on a valid action.
-chati_service_cmd() {
-    local target="$1"; shift
-    local action="${1:-status}"; [[ $# -gt 0 ]] && shift
-    local ail="$CHATI_DIR/ai_local/ailocal"
-    [[ -x "$ail" ]] || { echo "ailocal no encontrado en $ail" >&2; return 3; }
-    # Reject trailing args instead of dropping them (e.g. `chati webui start --port 9999`
-    # must not silently start on the default port).
-    if [[ $# -gt 0 && "$action" != -h && "$action" != --help ]]; then
-        echo "uso: chati $target start|stop|restart|status (argumento extra: $1)" >&2; return 2
-    fi
-    case "$action" in
-        start|stop|restart) exec "$ail" "$action" "$target" ;;
-        status)             exec "$ail" status ;;
-        -h|--help)          echo "uso: chati $target start|stop|restart|status"; return 0 ;;
-        *) echo "uso: chati $target start|stop|restart|status" >&2; return 2 ;;
-    esac
-}
-
 # --- Local service lifecycle (powers `chati status` and `chati stop`) ---------
 # chati keeps the local AI services simple: Ollama starts on demand when you
 # launch chati, SearXNG starts on demand when you use /web, and OpenWebUI is the
