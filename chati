@@ -1691,10 +1691,12 @@ while true; do
                         WEB_MODE="OFF"
                         echo "🚫 Web search unavailable:"
                         echo "$web_reason"
-                        # If a local endpoint is configured but still down (auto-start
-                        # didn't take, e.g. SearXNG isn't installed), name the command.
+                        # chati already tried to auto-start a local SearXNG above. If
+                        # it's configured but still down, the install is the thing to
+                        # check — don't point at a separate launcher (that's what the
+                        # single `chati` front door is meant to retire).
                         if _searxng_local_endpoint >/dev/null 2>&1; then
-                            echo "   Start your local SearXNG:  ailocal start searxng   (then /web again)"
+                            echo "   Couldn't bring the local SearXNG up — check it's installed (installer/SEARXNG_SETUP.md), then /web again."
                         else
                             echo "   Staying OFF. Set SEARXNG_URLS (or run a local SearXNG); see installer/SEARXNG_SETUP.md."
                         fi
