@@ -131,7 +131,7 @@ check_for_update_quiet() {
     printf '%s' "$now" > "$f" 2>/dev/null || true
     local latest; latest=$(chati_latest_version) || return 0
     version_gt "$CHATI_VERSION" "$latest" \
-        && echo "🆕 chati v$latest is available (you have $CHATI_VERSION). Update:  chati --update"
+        && echo "🆕 chati v$latest is available (you have $CHATI_VERSION). Update:  chati upgrade"
     return 0
 }
 
@@ -151,28 +151,24 @@ case "${1:-}" in
         echo "  doctor              Report the health of this install."
         echo "  search <query...>   Headless web search via the SearXNG backend (no REPL)."
         echo ""
+        echo "  check-update        Check GitHub for a newer release (prints, no changes)."
         echo "  -v, --version       Print the version."
-        echo "  --check-update      Check GitHub for a newer release (prints, no changes)."
         exit 0 ;;
     -v|--version)
         show_version; exit 0 ;;
-    upgrade|update|--update|--upgrade)
-        # `chati upgrade` is the canonical form (matches `chati install`); the
-        # dashed forms stay as quiet aliases. "upgrade"/"update" are reserved
-        # words so the dispatcher never routes them to a libexec script.
+    upgrade)
+        # One name, no dash (matches `chati install`). "upgrade" is reserved so
+        # the dispatcher never routes it to a libexec script.
         chati_self_update; exit $? ;;
-    --doctor)
-        # Alias for the `chati doctor` subcommand.
-        exec "$CHATI_DIR/libexec/chati-doctor" "${@:2}" ;;
-    --check-update|--check)
+    check-update)
         _lv=$(chati_latest_version) || { echo "chati: couldn't reach GitHub to check." >&2; exit 1; }
         if version_gt "$CHATI_VERSION" "$_lv"; then
-            echo "🆕 chati v$_lv is available (you have $CHATI_VERSION). Update:  chati --update"
+            echo "🆕 chati v$_lv is available (you have $CHATI_VERSION). Update:  chati upgrade"
         else
             echo "✅ chati is up to date ($CHATI_VERSION; latest release v$_lv)."
         fi
         exit 0 ;;
-    search|--search)
+    search)
         # Headless one-shot web search. Reuses lib_web.sh's web_search (sourced
         # via lib_chat.sh above), so it hits the exact same SearXNG endpoints and
         # formatting as the interactive /web pipeline — no REPL, no LLM call.

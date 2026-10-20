@@ -21,7 +21,7 @@ fi
 # A reserved name never resolves to libexec; it stays with the case until the
 # inline code is migrated out (then drop it from here — a bareword lives in ONE
 # place). Space-separated so bash 3.2 can match it without an array.
-CHATI_RESERVED_WORDS="${CHATI_RESERVED_WORDS:-search upgrade update}"
+CHATI_RESERVED_WORDS="${CHATI_RESERVED_WORDS:-search upgrade check-update}"
 
 # Git-style dispatch: given a subcommand name, echo the path of its executable
 # libexec script if it exists, else nothing. A leading-dash arg (a flag), an

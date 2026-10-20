@@ -121,7 +121,7 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
   ./setup.sh --force-models  pull the big gemma4 models even on a low-RAM box
   ./setup.sh --update        re-apply over an existing install, respecting its
                              profile (touches OpenWebUI/SearXNG only if already
-                             installed; no heavy reinstalls). Run by `chati --update`.
+                             installed; no heavy reinstalls). Run by `chati upgrade`.
   ./setup.sh --force-webui   force a clean OpenWebUI venv reinstall (repair)
   ./setup.sh --remove-all    UNINSTALL everything this script set up (asks first)
   ./setup.sh --remove-webui   uninstall ONLY OpenWebUI (wipes its data/DB; fixes a
@@ -158,7 +158,7 @@ while [[ $# -gt 0 ]]; do
         --no-pull)   WANT_PULL=0 ;;
         --no-extra-models) WANT_EXTRA_MODELS=0 ;; # skip the big gemma4 pair (still pulls bge-m3)
         --force-models)    FORCE_MODELS=1 ;;      # pull the big models even on a low-RAM box
-        --update)    UPDATE_MODE=1 ;;   # re-apply over an existing install (used by `chati --update`)
+        --update)    UPDATE_MODE=1 ;;   # re-apply over an existing install (used by `chati upgrade`)
         --force-webui) FORCE_WEBUI=1 ;; # force a clean OpenWebUI venv reinstall
         --model)     CHAT_MODEL="${2:?--model needs a model name}"; MODEL_EXPLICIT=1; shift ;;
         --client)    CLIENT_ONLY=1; CLIENT_MODE="full"
@@ -177,7 +177,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---- Re-apply mode (--update) ------------------------------------------------
-# `chati --update` runs `setup.sh --update` after pulling new code, so a code
+# `chati upgrade` runs `setup.sh --update` after pulling new code, so a code
 # update actually gets applied instead of the user having to remember to re-run
 # setup. A re-apply must NOT change the machine's profile: it re-applies config,
 # wiring and permissions, and touches OpenWebUI / SearXNG ONLY if they are
@@ -646,7 +646,7 @@ if [[ "$WANT_WEBUI" -eq 1 ]]; then
     # Idempotent by default: `ailocal upgrade webui` (no --force) runs
     # `uv pip install --upgrade`, which only downloads a new open-webui if PyPI
     # has one and is a fast no-op otherwise. This is what makes re-running setup
-    # (e.g. every `chati --update`) cheap. --force wipes and reinstalls the venv
+    # (e.g. every `chati upgrade`) cheap. --force wipes and reinstalls the venv
     # from scratch (repair a broken install); opt in with `setup.sh --force-webui`.
     if [[ "$FORCE_WEBUI" -eq 1 ]]; then
         "$REPO_ROOT/ai_local/ailocal" upgrade webui --force
