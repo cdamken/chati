@@ -1,0 +1,32 @@
+#!/bin/bash
+# summary: apaga los servicios locales (OpenWebUI, SearXNG y Ollama) para liberar la Mac
+#==============================================================================
+# chati stop — the "I'm done, free the machine" button.
+#
+# Stops OpenWebUI, SearXNG and Ollama (in that order: the UI and search first,
+# then the engine they lean on). Each is a no-op if it wasn't running. There is
+# deliberately no per-service start/restart here: Ollama and SearXNG come up on
+# their own (launching chati / using /web), and OpenWebUI starts with
+# `chati webui`.
+#==============================================================================
+set -o pipefail
+
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+    _dir="$(cd -P "$(dirname "$_src")" && pwd)"; _src="$(readlink "$_src")"
+    [[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+CHATI_DIR="$(cd -P "$(dirname "$_src")/.." && pwd)"
+unset _src _dir
+# shellcheck source=/dev/null
+source "$CHATI_DIR/chati-common.sh"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Usage: chati stop"
+    echo "Stop the local AI services (OpenWebUI, SearXNG, Ollama) to free the machine."
+    exit 0
+fi
+
+chati_svc_stop "$CHATI_WEBUI_PROC"   "OpenWebUI"
+chati_svc_stop "$CHATI_SEARXNG_PROC" "SearXNG"
+chati_svc_stop "$CHATI_OLLAMA_PROC"  "Ollama"

@@ -1,0 +1,51 @@
+#!/bin/bash
+# summary: muestra qué servicios locales están corriendo (Ollama, OpenWebUI, SearXNG)
+#==============================================================================
+# chati status — one glance at the local AI services.
+#
+# Ollama starts on its own when you launch chati; SearXNG starts on its own when
+# you use /web; OpenWebUI is the one you start by hand (`chati webui`). This just
+# reports which are up — it never starts anything. Pure bash + curl + jq.
+#==============================================================================
+set -o pipefail
+
+# Resolve the real repo dir (follow symlinks) so it works from a PATH symlink.
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+    _dir="$(cd -P "$(dirname "$_src")" && pwd)"; _src="$(readlink "$_src")"
+    [[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+CHATI_DIR="$(cd -P "$(dirname "$_src")/.." && pwd)"
+unset _src _dir
+# shellcheck source=/dev/null
+source "$CHATI_DIR/chati-common.sh"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Usage: chati status"
+    echo "Report which local AI services are running (Ollama, OpenWebUI, SearXNG)."
+    exit 0
+fi
+
+chati_load_env
+
+# --- Ollama (auto-starts with chati) ---
+if chati_svc_running "$CHATI_OLLAMA_PROC"; then
+    ver=$(curl -fsS --max-time 2 "$(chati_ollama_api)/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
+    echo "Ollama:    RUNNING${ver:+  (v$ver)}"
+else
+    echo "Ollama:    stopped   (starts on its own when you launch chati)"
+fi
+
+# --- OpenWebUI (the one you start by hand) ---
+if chati_svc_running "$CHATI_WEBUI_PROC"; then
+    echo "OpenWebUI: RUNNING   (http://${WEBUI_HOST:-127.0.0.1}:${WEBUI_PORT:-8888})"
+else
+    echo "OpenWebUI: stopped   (start it with: chati webui)"
+fi
+
+# --- SearXNG (auto-starts with /web) ---
+if chati_svc_running "$CHATI_SEARXNG_PROC"; then
+    echo "SearXNG:   RUNNING   (http://${SEARXNG_LOCAL_HOST:-127.0.0.1}:${SEARXNG_LOCAL_PORT:-8890})"
+else
+    echo "SearXNG:   stopped   (starts on its own when you use /web)"
+fi

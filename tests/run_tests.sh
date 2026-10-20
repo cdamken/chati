@@ -1583,6 +1583,29 @@ test_service_cmd_guards() {
 }
 run_test "chati_service_cmd guards invalid action and missing ailocal" test_service_cmd_guards
 
+test_svc_running_and_stop() {
+    # Exercise chati_svc_running / chati_svc_stop against a THROWAWAY process of
+    # our own (a sleep with a unique duration as the marker) — never a real
+    # service, so the test can't stop Ollama/OpenWebUI/SearXNG.
+    local marker=$(( 30000 + (RANDOM % 9000) ))
+    sleep "$marker" &
+    local pid=$!
+    # Give the process a moment to be visible to pgrep.
+    local t; for t in 1 2 3 4 5; do chati_svc_running "sleep $marker" && break; sleep 0.1; done
+    if ! chati_svc_running "sleep $marker"; then
+        kill "$pid" 2>/dev/null; echo "tagged sleep not seen as running" >&2; return 1
+    fi
+    local out; out=$(chati_svc_stop "sleep $marker" "TestSvc" 5)
+    if chati_svc_running "sleep $marker"; then
+        kill -9 "$pid" 2>/dev/null; echo "svc_stop left the process alive" >&2; return 1
+    fi
+    assert_match "$out" "TestSvc stopped" "svc_stop reports the stop" || return 1
+    # And a no-op path: nothing matching the pattern.
+    out=$(chati_svc_stop "sleep 999888777 nonexistent" "Ghost")
+    assert_eq "$out" "Ghost was not running" "svc_stop is a no-op when absent"
+}
+run_test "chati_svc_running/chati_svc_stop manage a service by proc pattern" test_svc_running_and_stop
+
 # --- extract_exec_cmd ---
 test_exec_simple() {
     local r; r=$(extract_exec_cmd "[EXEC: ls -la ~]")

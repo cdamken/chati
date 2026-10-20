@@ -83,6 +83,47 @@ chati_service_cmd() {
     esac
 }
 
+# --- Local service lifecycle (powers `chati status` and `chati stop`) ---------
+# chati keeps the local AI services simple: Ollama starts on demand when you
+# launch chati, SearXNG starts on demand when you use /web, and OpenWebUI is the
+# one you start explicitly (`chati webui`). There is NO manual start/restart for
+# Ollama or SearXNG by design. `chati stop` frees the machine; `chati status`
+# shows what's up. These constants + two helpers are the shared core they build
+# on (and fold the three near-identical stop loops ailocal carried into one).
+# These constants are consumed by the libexec service scripts that source this
+# file (chati status / chati stop), so shellcheck can't see the use here.
+CHATI_LOG_DIR="${CHATI_LOG_DIR:-$HOME/logs}"
+# Match "ollama serve" only at a word boundary, so "myollama serve" isn't hit.
+# shellcheck disable=SC2034  # used by libexec/chati-status and chati-stop
+CHATI_OLLAMA_PROC='(^|[/ ])ollama serve'
+# Match OpenWebUI by its FULL venv binary path (not the bare "open-webui serve"
+# substring), so pkill -f can't hit an unrelated process whose args contain it.
+CHATI_WEBUI_VENV="${OPENWEBUI_VENV:-$HOME/openwebui/.venv}"
+# shellcheck disable=SC2034  # used by libexec/chati-status and chati-stop
+CHATI_WEBUI_PROC="$CHATI_WEBUI_VENV/bin/open-webui serve"
+# shellcheck disable=SC2034  # used by libexec/chati-status and chati-stop
+CHATI_SEARXNG_PROC='granian.*searx\.webapp'
+
+# Is a service running? $1 = its `pgrep -f` pattern.
+chati_svc_running() { pgrep -f "$1" >/dev/null 2>&1; }
+
+# Stop a service: SIGTERM, wait up to grace seconds for it to actually exit
+# (OpenWebUI/uvicorn and SearXNG/granian take a few seconds, and touching their
+# SQLite before the process is gone can corrupt it), then SIGKILL as a last
+# resort. One copy of the loop ailocal repeated per service.
+#   $1 = proc pattern   $2 = label   $3 = grace seconds (default 15)
+chati_svc_stop() {
+    local pat="$1" label="$2" grace="${3:-15}" i
+    chati_svc_running "$pat" || { echo "$label was not running"; return 0; }
+    pkill -f "$pat"
+    for (( i = 0; i < grace; i++ )); do
+        chati_svc_running "$pat" || { echo "$label stopped"; return 0; }
+        sleep 1
+    done
+    pkill -9 -f "$pat"; sleep 1
+    echo "$label stopped (forced)"
+}
+
 # SEARXNG endpoints, one per line (comma- or newline-separated in the env),
 # trailing slashes stripped. Empty if none configured.
 chati_searxng_urls() {
