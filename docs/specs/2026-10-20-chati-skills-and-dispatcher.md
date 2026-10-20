@@ -34,6 +34,15 @@ marketplace; evitamos esa clase de riesgo de raiz manteniendo todo local.
   monolito.
 - Contrato de subcomando = igual que el de skill (abajo): cabecera con `summary`
   (para `chati help`) y `--check` obligatorio.
+- **Palabra reservada (regla de una sola fuente).** El dispatcher corre ANTES del
+  `case` de flags del REPL, asi que un `libexec/chati-<palabra>` podria robar en
+  silencio un bareword que el `case` todavia maneja inline (hoy: `search`).
+  `chati-common.sh` tiene `CHATI_RESERVED_WORDS`; `chati_resolve_subcommand`
+  devuelve vacio para una reservada, de modo que esta se queda con el `case`. Un
+  bareword vive en UN solo lugar: cuando su codigo migre a `libexec/chati-<n>`, se
+  borra la palabra de la lista reservada. Un test extrae los barewords del
+  dispatch de `chati` y asserta que ninguno choca con un `libexec` sin estar
+  reservado.
 
 ## B. Contrato de skill (ligero, de primera parte, pocos y curados)
 
@@ -96,6 +105,18 @@ allowlist. Esos existian solo para contener codigo ajeno, que aqui no habra.
    disable = el skill no existe esta sesion; el toggle = prende/apaga uno que SI
    esta habilitado. `/sY` es el caso estrella: poderoso y peligroso, y ahora se
    puede dejar inalcanzable.
+
+   Para que apagar `shell` NO sea cosmetico (revision de Dot), disable debe:
+   (a) no registrar su slash (/s, /sY); (b) no inyectar su prompt de capacidad;
+   y (c) **desactivar el parseo/ejecucion de `[EXEC: ...]`** que emite el modelo
+   (`extract_exec_cmd`). Si solo escondemos el slash pero seguimos ejecutando
+   `[EXEC:]`, el modelo todavia corre comandos y el candado es falso. Ademas:
+   enable/disable SOLO desde el CLI `chati skill` (nunca desde un slash ni
+   `@chati:set`, que un skill podria emitir); `skills.disabled` gana SIEMPRE
+   sobre los toggles por-sesion (un `AGENT_AUTOACCEPT` guardado no revive `/sY`);
+   y opcional `chati skill disable shell --lock` que ponga `chflags uchg`
+   (macOS) / `chattr +i` (Linux) al archivo de estado para una maquina
+   compartida de verdad.
 
 7. Dogfooding: `docr` es el primer skill migrado al contrato (es el candidato
    natural). Si el contrato no le queda comodo, esta mal el contrato.
