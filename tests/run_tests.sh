@@ -1460,6 +1460,64 @@ test_ola_payload_always_sends_think() {
 }
 run_test "ola sends think:false when OFF so reasoning models don't return empty (#86)" test_ola_payload_always_sends_think
 
+# --- chati-common.sh: subcommand dispatch + config helpers (Fase 1) ---
+# shellcheck source=/dev/null
+source "$PROJECT_DIR/chati-common.sh"
+
+test_resolve_subcommand() {
+    local d; d=$(mktemp -d); mkdir -p "$d/libexec"
+    printf '#!/bin/bash\necho hi\n' > "$d/libexec/chati-ping"; chmod +x "$d/libexec/chati-ping"
+    printf '#!/bin/bash\n' > "$d/libexec/chati-noexec"   # not executable
+    local save="$CHATI_DIR"; CHATI_DIR="$d"
+    local ok flag none noexec empty
+    ok=$(chati_resolve_subcommand ping)
+    flag=$(chati_resolve_subcommand --doctor)      # a flag never resolves
+    none=$(chati_resolve_subcommand nope)          # missing
+    noexec=$(chati_resolve_subcommand noexec)      # present but not +x
+    empty=$(chati_resolve_subcommand "")           # empty name
+    CHATI_DIR="$save"; rm -rf "$d"
+    assert_eq "$ok" "$d/libexec/chati-ping" "resolves an executable subcommand" \
+        && assert_eq "$flag" "" "a flag does not resolve" \
+        && assert_eq "$none" "" "a missing subcommand does not resolve" \
+        && assert_eq "$noexec" "" "a non-executable file does not resolve" \
+        && assert_eq "$empty" "" "empty name does not resolve"
+}
+run_test "chati_resolve_subcommand: git-style dispatch rule" test_resolve_subcommand
+
+test_searxng_urls_parse() {
+    local out
+    out=$(SEARXNG_URLS="http://a:8890/ , https://b/searx" chati_searxng_urls | tr '\n' ',')
+    assert_eq "$out" "http://a:8890,https://b/searx," "comma-split, trimmed, trailing slash stripped"
+    out=$(SEARXNG_URLS="" SEARXNG_URL="http://only:8890" chati_searxng_urls)
+    assert_eq "$out" "http://only:8890" "falls back to single SEARXNG_URL"
+}
+run_test "chati_searxng_urls parses endpoints (comma/trim/slash)" test_searxng_urls_parse
+
+test_doctor_line_format() {
+    # Source the doctor (its guard skips the probes) to get the pure formatter.
+    # shellcheck source=/dev/null
+    source "$PROJECT_DIR/libexec/chati-doctor"
+    local okl faill
+    okl=$(_doctor_line ok "Ollama" "up"); faill=$(_doctor_line fail "Ollama" "down")
+    assert_match "$okl" "Ollama" "row carries the label" \
+        && assert_match "$okl" "✅" "ok row shows the ok icon" \
+        && assert_match "$faill" "❌" "fail row shows the fail icon"
+}
+run_test "chati-doctor _doctor_line formats status rows" test_doctor_line_format
+
+test_service_cmd_guards() {
+    # Validate the non-exec branches (a valid action would exec ailocal and
+    # actually start/stop a service, so we only test the guards here).
+    local save="$CHATI_DIR"
+    local bad; ( CHATI_DIR="$PWD"; chati_service_cmd webui frobnicate ) >/dev/null 2>&1; bad=$?
+    local d; d=$(mktemp -d)   # no ailocal inside → missing-dep
+    local miss; ( CHATI_DIR="$d"; chati_service_cmd webui start ) >/dev/null 2>&1; miss=$?
+    rm -rf "$d"; CHATI_DIR="$save"
+    assert_eq "$bad" "2" "invalid action -> exit 2 (usage)" \
+        && assert_eq "$miss" "3" "missing ailocal -> exit 3 (dependency)"
+}
+run_test "chati_service_cmd guards invalid action and missing ailocal" test_service_cmd_guards
+
 # --- extract_exec_cmd ---
 test_exec_simple() {
     local r; r=$(extract_exec_cmd "[EXEC: ls -la ~]")

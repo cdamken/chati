@@ -1,0 +1,114 @@
+#!/bin/bash
+#==============================================================================
+# chati-doctor — one-glance health check for a chati install.
+#==============================================================================
+# chati-skill is not used here; this is a libexec subcommand, run as:
+#     chati doctor        (or the alias: chati --doctor)
+#
+# Checks the core (chati version, Ollama reachable, models present) and the
+# optional pieces (SearXNG endpoints, OpenWebUI). Prints a table and exits 0
+# when the core is healthy, non-zero when Ollama is unreachable (the one thing
+# chat cannot work without). Pure bash + curl + jq.
+#
+# Future (per the spec): iterate each subcommand/skill's `--check` instead of
+# hard-coding SearXNG/webui here. For now it probes the current pieces directly.
+#==============================================================================
+set -o pipefail
+
+# Resolve the real repo dir (follow symlinks) so `chati doctor` works from a
+# PATH symlink too. libexec/ lives one level below the repo root.
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+    _dir="$(cd -P "$(dirname "$_src")" && pwd)"; _src="$(readlink "$_src")"
+    [[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+CHATI_DIR="$(cd -P "$(dirname "$_src")/.." && pwd)"
+unset _src _dir
+# shellcheck source=/dev/null
+source "$CHATI_DIR/chati-common.sh"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Usage: chati doctor"
+    echo "Report the health of this chati install (version, Ollama, models, SearXNG, OpenWebUI)."
+    exit 0
+fi
+
+# One formatted status row. Pure (no I/O beyond printing) so tests can pin it.
+#   _doctor_line <ok|warn|fail> <label> <detail>
+_doctor_line() {
+    local st="$1" label="$2" detail="$3" icon
+    case "$st" in
+        ok)   icon="✅" ;;
+        warn) icon="⚠️ " ;;
+        *)    icon="❌" ;;
+    esac
+    printf '%s  %-12s %s\n' "$icon" "$label" "$detail"
+}
+
+# Only run the probes when executed, not when sourced by a test.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0 2>/dev/null || true
+fi
+
+chati_load_env
+
+CHATI_VERSION="$(cat "$CHATI_DIR/VERSION" 2>/dev/null || echo "?")"
+API="$(chati_ollama_api)"
+rc=0
+
+echo "chati doctor — $(date '+%d.%m.%Y %H:%M')"
+echo
+
+# --- chati version ---
+_doctor_line ok "chati" "v$CHATI_VERSION  ($CHATI_DIR)"
+
+# --- Ollama reachable + models ---
+if ver=$(curl -fsS --max-time 4 "$API/api/version" 2>/dev/null); then
+    ovr=$(printf '%s' "$ver" | jq -r '.version // empty' 2>/dev/null)
+    ntags=$(curl -fsS --max-time 4 "$API/api/tags" 2>/dev/null | jq -r '.models | length' 2>/dev/null)
+    _doctor_line ok "Ollama" "up at $API${ovr:+  v$ovr}${ntags:+  ($ntags modelos)}"
+    if [[ -n "$ntags" && "$ntags" -eq 0 ]]; then
+        _doctor_line warn "modelos" "ninguno instalado — ollama pull <modelo>"
+    fi
+else
+    _doctor_line fail "Ollama" "no responde en $API — arráncalo o revisa OLLAMA_API"
+    rc=1
+fi
+
+# --- SearXNG endpoints (optional, powers /web and --search) ---
+# No `mapfile`: macOS ships bash 3.2, which lacks it.
+_sx=()
+while IFS= read -r _u || [[ -n "$_u" ]]; do
+    [[ -n "$_u" ]] && _sx+=("$_u")
+done < <(chati_searxng_urls)
+if [[ ${#_sx[@]} -eq 0 ]]; then
+    _doctor_line warn "SearXNG" "sin configurar (SEARXNG_URLS) — /web queda off"
+else
+    up=0
+    for u in "${_sx[@]}"; do
+        if curl -fsS --max-time 4 "$u/search?q=ping&format=json" >/dev/null 2>&1 \
+           || curl -fsS --max-time 4 "$u/" >/dev/null 2>&1; then
+            _doctor_line ok "SearXNG" "sirve: $u"
+            up=$((up+1))
+        else
+            _doctor_line warn "SearXNG" "no responde: $u"
+        fi
+    done
+fi
+
+# --- OpenWebUI (optional) ---
+WEBUI_PORT="${WEBUI_PORT:-8888}"
+WEBUI_HOST="${WEBUI_HOST:-127.0.0.1}"
+if curl -fsS --max-time 4 "http://$WEBUI_HOST:$WEBUI_PORT/health" >/dev/null 2>&1; then
+    _doctor_line ok "OpenWebUI" "up en http://$WEBUI_HOST:$WEBUI_PORT"
+else
+    _doctor_line warn "OpenWebUI" "no responde en :$WEBUI_PORT — opcional (chati webui start)"
+fi
+
+echo
+if [[ $rc -eq 0 ]]; then
+    echo "Core OK."
+else
+    echo "Core con problemas: el chat no funciona hasta que Ollama responda."
+fi
+exit $rc
