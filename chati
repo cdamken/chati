@@ -139,20 +139,27 @@ check_for_update_quiet() {
 # headless `chati search` subcommand work without entering the REPL.
 case "${1:-}" in
     -h|--help)
-        echo "Usage: chati [-h|--help] [-v|--version] [--check-update] [--update] [search <query...>]"
-        echo "Interactive Ollama chat. Type /h once inside for command list."
+        echo "Usage: chati [command]"
+        echo "With no command, starts the interactive Ollama chat (type /h inside for the command list)."
         echo ""
+        echo "Commands (one front door, no dashes):"
+        echo "  install [flags]     Install chati and its services (flags pass to the installer)."
+        echo "  upgrade             Update this checkout to the latest release (git pull + re-apply)."
+        echo "  webui               Start the OpenWebUI stack (Ollama + OpenWebUI)."
+        echo "  stop                Stop the local services (OpenWebUI, SearXNG, Ollama)."
+        echo "  status              Show which local services are running."
+        echo "  doctor              Report the health of this install."
+        echo "  search <query...>   Headless web search via the SearXNG backend (no REPL)."
+        echo ""
+        echo "  -v, --version       Print the version."
         echo "  --check-update      Check GitHub for a newer release (prints, no changes)."
-        echo "  --update            Update this checkout to the latest release (git pull)."
-        echo ""
-        echo "  search <query...>   Headless web search via the SearXNG backend:"
-        echo "                      prints results and exits (no REPL). For scripts,"
-        echo "                      pipelines and other machines/agents. Needs SEARXNG_URLS"
-        echo "                      configured in .env (same backend as the /web toggle)."
         exit 0 ;;
     -v|--version)
         show_version; exit 0 ;;
-    --update|--upgrade)
+    upgrade|update|--update|--upgrade)
+        # `chati upgrade` is the canonical form (matches `chati install`); the
+        # dashed forms stay as quiet aliases. "upgrade"/"update" are reserved
+        # words so the dispatcher never routes them to a libexec script.
         chati_self_update; exit $? ;;
     --doctor)
         # Alias for the `chati doctor` subcommand.
