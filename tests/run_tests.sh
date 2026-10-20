@@ -1468,21 +1468,52 @@ test_resolve_subcommand() {
     local d; d=$(mktemp -d); mkdir -p "$d/libexec"
     printf '#!/bin/bash\necho hi\n' > "$d/libexec/chati-ping"; chmod +x "$d/libexec/chati-ping"
     printf '#!/bin/bash\n' > "$d/libexec/chati-noexec"   # not executable
+    # A reserved word (owned by the REPL case) must NOT resolve even if a
+    # libexec/chati-<word> exists — otherwise it would silently steal the word.
+    printf '#!/bin/bash\n' > "$d/libexec/chati-search"; chmod +x "$d/libexec/chati-search"
     local save="$CHATI_DIR"; CHATI_DIR="$d"
-    local ok flag none noexec empty
+    local ok flag none noexec empty resv
     ok=$(chati_resolve_subcommand ping)
     flag=$(chati_resolve_subcommand --doctor)      # a flag never resolves
     none=$(chati_resolve_subcommand nope)          # missing
     noexec=$(chati_resolve_subcommand noexec)      # present but not +x
     empty=$(chati_resolve_subcommand "")           # empty name
+    resv=$(CHATI_RESERVED_WORDS="search" chati_resolve_subcommand search)  # reserved
     CHATI_DIR="$save"; rm -rf "$d"
     assert_eq "$ok" "$d/libexec/chati-ping" "resolves an executable subcommand" \
         && assert_eq "$flag" "" "a flag does not resolve" \
         && assert_eq "$none" "" "a missing subcommand does not resolve" \
         && assert_eq "$noexec" "" "a non-executable file does not resolve" \
-        && assert_eq "$empty" "" "empty name does not resolve"
+        && assert_eq "$empty" "" "empty name does not resolve" \
+        && assert_eq "$resv" "" "a reserved word does not resolve to libexec"
 }
 run_test "chati_resolve_subcommand: git-style dispatch rule" test_resolve_subcommand
+
+test_no_bareword_collides_with_libexec() {
+    # Every bareword the REPL handles inline in its TOP-LEVEL dispatch case
+    # (`case "${1:-}" in` ... bottom `esac`) must be reserved, so the dispatcher
+    # (which runs first) never silently shadows it with a libexec/chati-<word>.
+    # Scope to that block only: top-level arms are indented 4 spaces; nested
+    # case arms (deeper indent) and helper `case` blocks elsewhere are ignored.
+    # shellcheck source=/dev/null
+    source "$PROJECT_DIR/chati-common.sh"
+    local word hit=""
+    while IFS= read -r word; do
+        [[ -n "$word" ]] || continue
+        if [[ -x "$PROJECT_DIR/libexec/chati-$word" ]]; then
+            case " $CHATI_RESERVED_WORDS " in
+                *" $word "*) : ;;                     # reserved: fine
+                *) hit="$hit $word" ;;                # collision: libexec shadows the case
+            esac
+        fi
+    done < <(
+        awk '/^case "\$\{1:-\}" in/{f=1;next} f&&/^esac/{exit} f' "$PROJECT_DIR/chati" \
+            | grep -oE '^    [a-z][a-z0-9-]*[|)]' \
+            | tr -d ' |)' | sort -u
+    )
+    assert_eq "$hit" "" "no inline bareword is shadowed by a libexec script"
+}
+run_test "dispatcher: no bareword collides with a libexec script" test_no_bareword_collides_with_libexec
 
 test_searxng_urls_parse() {
     local out
@@ -1510,10 +1541,17 @@ test_service_cmd_guards() {
     # actually start/stop a service, so we only test the guards here).
     local save="$CHATI_DIR"
     local bad; ( CHATI_DIR="$PWD"; chati_service_cmd webui frobnicate ) >/dev/null 2>&1; bad=$?
+    # Extra args after a valid action are rejected, not dropped (needs ailocal
+    # present so we exercise the extra-arg guard, not the missing-dep branch).
+    local e; e=$(mktemp -d); mkdir -p "$e/ai_local"
+    printf '#!/bin/bash\nexit 0\n' > "$e/ai_local/ailocal"; chmod +x "$e/ai_local/ailocal"
+    local extra; ( CHATI_DIR="$e"; chati_service_cmd webui start --port 9999 ) >/dev/null 2>&1; extra=$?
+    rm -rf "$e"
     local d; d=$(mktemp -d)   # no ailocal inside → missing-dep
     local miss; ( CHATI_DIR="$d"; chati_service_cmd webui start ) >/dev/null 2>&1; miss=$?
     rm -rf "$d"; CHATI_DIR="$save"
     assert_eq "$bad" "2" "invalid action -> exit 2 (usage)" \
+        && assert_eq "$extra" "2" "extra args after action -> exit 2 (usage)" \
         && assert_eq "$miss" "3" "missing ailocal -> exit 3 (dependency)"
 }
 run_test "chati_service_cmd guards invalid action and missing ailocal" test_service_cmd_guards

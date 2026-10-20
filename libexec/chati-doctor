@@ -27,12 +27,6 @@ unset _src _dir
 # shellcheck source=/dev/null
 source "$CHATI_DIR/chati-common.sh"
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    echo "Usage: chati doctor"
-    echo "Report the health of this chati install (version, Ollama, models, SearXNG, OpenWebUI)."
-    exit 0
-fi
-
 # One formatted status row. Pure (no I/O beyond printing) so tests can pin it.
 #   _doctor_line <ok|warn|fail> <label> <detail>
 _doctor_line() {
@@ -48,6 +42,12 @@ _doctor_line() {
 # Only run the probes when executed, not when sourced by a test.
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
     return 0 2>/dev/null || true
+fi
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Usage: chati doctor"
+    echo "Report the health of this chati install (version, Ollama, models, SearXNG, OpenWebUI)."
+    exit 0
 fi
 
 chati_load_env
@@ -84,12 +84,10 @@ done < <(chati_searxng_urls)
 if [[ ${#_sx[@]} -eq 0 ]]; then
     _doctor_line warn "SearXNG" "sin configurar (SEARXNG_URLS) — /web queda off"
 else
-    up=0
     for u in "${_sx[@]}"; do
         if curl -fsS --max-time 4 "$u/search?q=ping&format=json" >/dev/null 2>&1 \
            || curl -fsS --max-time 4 "$u/" >/dev/null 2>&1; then
             _doctor_line ok "SearXNG" "sirve: $u"
-            up=$((up+1))
         else
             _doctor_line warn "SearXNG" "no responde: $u"
         fi

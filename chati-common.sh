@@ -15,12 +15,25 @@ if [[ -z "${CHATI_DIR:-}" ]]; then
     CHATI_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
+# Words the REPL's own flag `case` still owns (bareword subcommands handled
+# inline, e.g. `chati search`). The dispatcher runs BEFORE that case, so a
+# libexec/chati-<word> with one of these names would silently steal the word.
+# A reserved name never resolves to libexec; it stays with the case until the
+# inline code is migrated out (then drop it from here — a bareword lives in ONE
+# place). Space-separated so bash 3.2 can match it without an array.
+CHATI_RESERVED_WORDS="${CHATI_RESERVED_WORDS:-search}"
+
 # Git-style dispatch: given a subcommand name, echo the path of its executable
-# libexec script if it exists, else nothing. A leading-dash arg (a flag) or an
-# empty name never resolves. This is the single rule the dispatcher uses.
+# libexec script if it exists, else nothing. A leading-dash arg (a flag), an
+# empty name, or a reserved word (owned by the REPL case) never resolves. This
+# is the single rule the dispatcher uses.
 chati_resolve_subcommand() {
-    local name="${1:-}"
-    [[ -n "$name" && "$name" != -* && -x "$CHATI_DIR/libexec/chati-$name" ]] \
+    local name="${1:-}" w
+    [[ -n "$name" && "$name" != -* ]] || return 0
+    for w in $CHATI_RESERVED_WORDS; do
+        [[ "$name" == "$w" ]] && return 0
+    done
+    [[ -x "$CHATI_DIR/libexec/chati-$name" ]] \
         && printf '%s\n' "$CHATI_DIR/libexec/chati-$name"
 }
 
@@ -54,9 +67,14 @@ chati_ollama_api() { printf '%s' "${OLLAMA_API:-http://localhost:11434}"; }
 # single `chati` front door. `exec`s ailocal on a valid action.
 chati_service_cmd() {
     local target="$1"; shift
-    local action="${1:-status}"
+    local action="${1:-status}"; [[ $# -gt 0 ]] && shift
     local ail="$CHATI_DIR/ai_local/ailocal"
     [[ -x "$ail" ]] || { echo "ailocal no encontrado en $ail" >&2; return 3; }
+    # Reject trailing args instead of dropping them (e.g. `chati webui start --port 9999`
+    # must not silently start on the default port).
+    if [[ $# -gt 0 && "$action" != -h && "$action" != --help ]]; then
+        echo "uso: chati $target start|stop|restart|status (argumento extra: $1)" >&2; return 2
+    fi
     case "$action" in
         start|stop|restart) exec "$ail" "$action" "$target" ;;
         status)             exec "$ail" status ;;
