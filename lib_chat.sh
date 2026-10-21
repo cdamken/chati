@@ -369,7 +369,7 @@ prettify_stream() {
         cat
         return
     fi
-    perl -CSAD -e "$CHATI_PRETTY_PROG"
+    perl -CSAD -e "$CHATI_PRETTY_PROG"  # bash-only-allow: TeX->Unicode prettifier, awk port pending (#89)
 }
 
 # Render the REASONING channel of an Ollama /api/chat stream. Reads the NDJSON

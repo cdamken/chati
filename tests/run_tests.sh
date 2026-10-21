@@ -1758,6 +1758,62 @@ test_too_many_ocr_is_intent_gated() {
 run_test "auto-OCR 'too many' banner is gated by read intent" test_too_many_ocr_is_intent_gated
 
 #==============================================================================
+# PHASE 2b — bash-only guard (#89)
+#==============================================================================
+phase "PHASE 2b: bash-only guard"
+
+# chati is bash-only (AGENTS.md). The only sanctioned scripting runtime left is
+# perl (the TeX->Unicode prettifier in lib_chat.sh, marked bash-only-allow until
+# its awk port lands, #89). Any other invocation of python/perl/ruby/node/php/
+# groovy in a tracked shell script is a regression. A sanctioned line opts out
+# with a trailing `# bash-only-allow: <reason>` marker. `[EXEC: ...]` lines are
+# skipped: those are model-emitted example commands in the system prompt (run
+# sandboxed), not chati's own code, so the bash-only rule doesn't govern them.
+# swiftc is out of scope:
+# it compiles a native Apple Vision OCR helper that bash cannot replace, not a
+# scripting runtime standing in for shell logic.
+test_bash_only_no_foreign_runtimes() {
+    # The shipped scripts only. The test harness itself is excluded: it names
+    # these runtimes on purpose (to enforce this very rule), so scanning it would
+    # flag its own strings.
+    local scripts=(chati lib_chat.sh lib_web.sh setup.sh ai_local/ailocal docr/docr
+                   ola_chat/ola ola_chat/mola ola_chat/ola_model
+                   installer/install_searxng.sh)
+    local banned='python3|python|perl|ruby|nodejs|node|php|groovy'
+    local f offenders=""
+    for f in "${scripts[@]}"; do
+        [[ -e "$PROJECT_DIR/$f" ]] || continue
+        # A runtime used as a command: the word with a non-identifier char (or
+        # line start) before it and whitespace/EOL after. Drop comment-only
+        # lines, `command -v X` / `which X` probes, python@3.x formula names,
+        # and lines that explicitly opt out with a bash-only-allow marker.
+        while IFS= read -r hit; do
+            offenders="$offenders
+  $f:$hit"
+        done < <(
+            grep -nE "(^[[:space:]]*|[|;&\`({][[:space:]]*|\\\$\()(${banned})([[:space:]]|\$)" "$PROJECT_DIR/$f" 2>/dev/null \
+                | grep -vE ':[[:space:]]*#' \
+                | grep -vE 'command -v|which |python@|bash-only-allow' \
+                | grep -vE '\[EXEC:'
+        )
+    done
+    [[ -z "$offenders" ]] || {
+        echo "foreign scripting runtime(s) outside the bash-only allowlist:$offenders" >&2
+        return 1
+    }
+}
+run_test "bash-only: no foreign scripting runtime outside the allowlist" test_bash_only_no_foreign_runtimes
+
+test_no_dead_groovy() {
+    # GraphPdfOcr.groovy was a never-invoked reference implementation; it and the
+    # groovy brew dependency are gone. Guard against either coming back.
+    assert_file_absent "$PROJECT_DIR/docr/GraphPdfOcr.groovy" \
+        && { ! grep -qiE '^[^#]*brew .*groovy|^brew "groovy"' "$PROJECT_DIR/setup.sh" "$PROJECT_DIR/installer/Brewfile" 2>/dev/null \
+             || { echo "groovy brew dependency is back" >&2; return 1; }; }
+}
+run_test "bash-only: dead Groovy stays removed" test_no_dead_groovy
+
+#==============================================================================
 # PHASE 3 — Integration (needs Ollama)
 #==============================================================================
 phase "PHASE 3: integration (needs Ollama)"

@@ -331,7 +331,7 @@ remove_searxng() {
 # Two tiers, both offload inference to a remote Ollama (no local server, no
 # models pulled, no OpenWebUI, no LOCAL SearXNG service):
 #   --client          FULL client — also installs the OCR stack (Apple Vision +
-#                     tesseract/poppler/imagemagick/ghostscript/groovy) so /ocr
+#                     tesseract/poppler/imagemagick/ghostscript) so /ocr
 #                     and /file on images/PDFs work, and can do /web by pointing
 #                     at a remote SearXNG URL.
 #   --client-minimal  BARE client — only curl/jq/lynx + the ollama CLI. Chat
@@ -351,7 +351,7 @@ client_install() {
 
     if (( full )); then
         step "Full client install (remote Ollama + local OCR + /web via remote SearXNG)"
-        brew install curl jq lynx ollama tesseract tesseract-lang imagemagick ghostscript poppler groovy \
+        brew install curl jq lynx ollama tesseract tesseract-lang imagemagick ghostscript poppler \
             || die "Could not install client packages."
         ok "Installed chat + OCR tools (no models, no local Ollama server, no OpenWebUI/SearXNG service)"
     else
