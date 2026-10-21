@@ -1808,6 +1808,52 @@ else
 fi
 
 #==============================================================================
+# PHASE 4 — Lint (shellcheck ratchet, #96)
+#==============================================================================
+phase "PHASE 4: lint (shellcheck ratchet)"
+
+# Per-file ceiling of `shellcheck -x -S warning` findings. The lint test fails
+# if a file goes ABOVE its number: a ratchet, warnings can only come down. Lower
+# these as the backlog is cleared; docr's 52 is the SC2155 "declare and assign
+# separately" batch (see #90). setup.sh's 2 are the SC2221/2222 duplicate-case
+# pair fixed in #98. A file not listed here gets a ceiling of 0.
+_lint_ceiling() {
+    # shellcheck is a dev-only tool (needed to run these tests, never at
+    # runtime), so setup.sh does NOT pull it onto every client/server box.
+    case "$1" in
+        docr/docr)        echo 52 ;;
+        chati)            echo 2 ;;
+        lib_chat.sh)      echo 2 ;;
+        setup.sh)         echo 2 ;;
+        ai_local/ailocal) echo 1 ;;
+        *)                echo 0 ;;
+    esac
+}
+
+test_lint_shellcheck() {
+    local files=(chati lib_chat.sh lib_web.sh setup.sh ai_local/ailocal docr/docr)
+    # Include dispatcher subcommands once the chati-<sub> split lands (#87).
+    local x
+    for x in "$PROJECT_DIR"/libexec/chati-*; do
+        [[ -x "$x" ]] && files+=("libexec/${x##*/}")
+    done
+    local f n ceil over=""
+    for f in "${files[@]}"; do
+        [[ -e "$PROJECT_DIR/$f" ]] || continue
+        n=$(shellcheck -x -S warning -f gcc "$PROJECT_DIR/$f" 2>/dev/null | grep -c .)
+        ceil=$(_lint_ceiling "$f")
+        (( n > ceil )) && over="$over $f ($n > $ceil)"
+    done
+    [[ -z "$over" ]] || { echo "shellcheck ratchet exceeded:$over" >&2; return 1; }
+}
+
+if command -v shellcheck >/dev/null 2>&1; then
+    run_test "shellcheck findings stay at or below the ratchet" test_lint_shellcheck
+else
+    skip_test "shellcheck ratchet" "shellcheck not installed — brew install shellcheck (dev-only)"
+fi
+
+#==============================================================================
 # Results
 #==============================================================================
 echo ""
