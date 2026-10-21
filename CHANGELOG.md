@@ -7,6 +7,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.35.0] - 2026-10-21
+
+### Added
+- **`/web` now auto-starts a local SearXNG that's down.** Toggling `/web` runs
+  the backend preflight; if a configured endpoint is local (localhost/127.0.0.1)
+  and not answering, chati starts it and re-checks instead of refusing the mode,
+  the same way it already auto-starts a local Ollama. A remote-only config is a
+  no-op (a cloud SearXNG can't be started from here). The headless `chati search`
+  stays a pure query.
+- **A shellcheck ratchet lint stage in the test suite.** `shellcheck -x -S warning`
+  runs over the bash entry points and fails if any file rises above a per-file
+  ceiling, so warning-level regressions can only come down. Skips with a notice
+  when shellcheck isn't installed (it's a dev-only tool).
+
+### Fixed
+- **`setup.sh --client HOST --searxng URL` now actually sets the client's
+  SearXNG.** The arg parser had `--searxng` twice in its `case`; the first arm
+  shadowed the second, so the URL was never captured (shellcheck SC2221/2222).
+
+### Removed
+- **Dead `GraphPdfOcr.groovy` reference implementation and the `groovy`
+  dependency.** No script invoked it (`docr/docr` is the real OCR engine). A new
+  bash-only guard in the test suite flags any scripting runtime (python/perl/
+  ruby/node/php/groovy) invoked from the shipped shell scripts outside a small
+  allowlist.
+
 ## [1.33.2] - 2026-09-24
 
 ### Changed
