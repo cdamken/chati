@@ -152,7 +152,9 @@ while [[ $# -gt 0 ]]; do
         --no-webui)  WANT_WEBUI=0 ;;
         --no-searxng) WANT_SEARXNG=0 ;;
         --webui)     WANT_WEBUI=1 ;;     # accepted for compatibility (now default)
-        --searxng)   WANT_SEARXNG=1 ;;   # accepted for compatibility (now default)
+        --searxng)   WANT_SEARXNG=1       # compat on a server (now default); on a
+                     # client, an optional URL after it points /web at a remote SearXNG.
+                     if [[ -n "${2:-}" && "$2" != -* ]]; then CLIENT_SEARXNG="$2"; shift; fi ;;
         --no-pull)   WANT_PULL=0 ;;
         --no-extra-models) WANT_EXTRA_MODELS=0 ;; # skip the big gemma4 pair (still pulls bge-m3)
         --force-models)    FORCE_MODELS=1 ;;      # pull the big models even on a low-RAM box
@@ -163,7 +165,6 @@ while [[ $# -gt 0 ]]; do
                      if [[ -n "${2:-}" && "$2" != -* ]]; then CLIENT_HOST="$2"; shift; fi ;;
         --client-minimal) CLIENT_ONLY=1; CLIENT_MODE="minimal"
                      if [[ -n "${2:-}" && "$2" != -* ]]; then CLIENT_HOST="$2"; shift; fi ;;
-        --searxng)   CLIENT_SEARXNG="${2:?--searxng needs a URL}"; shift ;;
         --remove-all) REMOVE_ALL=1 ;;
         --remove-webui)   REMOVE_WEBUI=1 ;;
         --remove-searxng) REMOVE_SEARXNG=1 ;;

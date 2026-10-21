@@ -200,6 +200,19 @@ test_ailocal_searxng_documented() {
 }
 run_test "ailocal exposes the searxng target" test_ailocal_searxng_documented
 
+test_setup_searxng_case_not_shadowed() {
+    # Regression (#88): --searxng appeared twice in the arg case; the first match
+    # (WANT_SEARXNG=1) shadowed the second, so `--client H --searxng URL` never
+    # set CLIENT_SEARXNG. The merged case must be unique AND capture the URL.
+    local n; n=$(grep -cE '^[[:space:]]*--searxng\)' "$PROJECT_DIR/setup.sh")
+    [[ "$n" -eq 1 ]] || { echo "expected exactly one --searxng) case, found $n" >&2; return 1; }
+    # The single case both enables searxng and captures the optional client URL.
+    awk '/^[[:space:]]*--searxng\)/{f=1} f{print} /;;[[:space:]]*$/{if(f)exit}' \
+        "$PROJECT_DIR/setup.sh" | grep -q 'CLIENT_SEARXNG=' \
+        || { echo "--searxng case must capture CLIENT_SEARXNG" >&2; return 1; }
+}
+run_test "setup.sh --searxng case is unique and captures the URL" test_setup_searxng_case_not_shadowed
+
 test_update_applies_setup() {
     # chati --update must APPLY what it pulls (run setup --update), not just pull.
     grep -q 'setup.sh" --update' "$PROJECT_DIR/chati" \
