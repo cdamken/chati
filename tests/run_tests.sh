@@ -141,6 +141,22 @@ test_chati_version() {
 }
 run_test "chati --version prints a version" test_chati_version
 
+test_removed_dash_flags_dont_launch_chat() {
+    # Regression: `chati --upgrade` (and other removed dashed forms) used to fall
+    # through the flag case and silently launch the REPL. They must now error
+    # with guidance to the dashless verb and a non-zero exit, never start chat.
+    local out
+    out=$(./chati --upgrade </dev/null 2>&1); [[ $? -eq 2 ]] || { echo "--upgrade should exit 2" >&2; return 1; }
+    assert_match "$out" "chati upgrade" "--upgrade points to dashless verb" || return 1
+    out=$(./chati --bogus </dev/null 2>&1); [[ $? -eq 2 ]] || { echo "--bogus should exit 2" >&2; return 1; }
+    assert_match "$out" "unknown option" "unknown flag is reported" || return 1
+    # And it must NOT have printed the REPL banner.
+    if printf '%s' "$out" | grep -q "Current Chati Settings"; then
+        echo "a removed flag launched the chat REPL" >&2; return 1
+    fi
+}
+run_test "removed dashed flags guide to the verb, never launch chat" test_removed_dash_flags_dont_launch_chat
+
 test_mola_help() {
     local out
     out=$(./ola_chat/mola --help 2>&1) || return 1

@@ -30,7 +30,7 @@ if [[ -n "$_subpath" ]]; then
 fi
 unset _subpath
 
-CHATI_VERSION="1.36.1"
+CHATI_VERSION="1.36.2"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -206,6 +206,26 @@ case "${1:-}" in
         esac
         ;;
 esac
+
+# Any leading-dash argument that reached here is an unknown option: -h/--help,
+# -v/--version and the dashless verbs were all handled above. Do NOT fall
+# through to the chat REPL — that silently swallowed typos and old muscle memory
+# like `chati --upgrade`, launching chat instead of upgrading. The dashed
+# command forms were removed in 1.36; point at the dashless verb and exit.
+if [[ "${1:-}" == -* ]]; then
+    case "$1" in
+        --update|--upgrade)     echo "chati: '$1' was removed in 1.36 — use:  chati upgrade" >&2 ;;
+        --install)              echo "chati: '$1' was removed in 1.36 — use:  chati install" >&2 ;;
+        --doctor)               echo "chati: '$1' was removed in 1.36 — use:  chati doctor" >&2 ;;
+        --check|--check-update) echo "chati: '$1' was removed in 1.36 — use:  chati check-update" >&2 ;;
+        --search)               echo "chati: '$1' was removed in 1.36 — use:  chati search <query...>" >&2 ;;
+        --status)               echo "chati: '$1' was removed in 1.36 — use:  chati status" >&2 ;;
+        --stop)                 echo "chati: '$1' was removed in 1.36 — use:  chati stop" >&2 ;;
+        --webui)                echo "chati: '$1' was removed in 1.36 — use:  chati webui" >&2 ;;
+        *)                      echo "chati: unknown option '$1' (try: chati --help)" >&2 ;;
+    esac
+    exit 2
+fi
 
 # --- HISTORY MANAGEMENT ---
 # Under $STATE_DIR so each CHATI_INSTANCE keeps its own command history.

@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.36.2] - 2026-10-22
+
+### Fixed
+- **A removed dashed flag no longer silently launches the chat.** On a machine
+  already on 1.36, typing the old `chati --upgrade` (or `--update`, `--install`,
+  `--doctor`, `--search`, `--status`, `--stop`, `--webui`) fell through the flag
+  parser and started the interactive REPL instead of doing anything. Any
+  unrecognized leading-dash argument now prints a one-line pointer to the
+  dashless verb (e.g. `use: chati upgrade`) and exits non-zero, and an unknown
+  `--flag` is reported as such. The dashless verbs themselves are unchanged.
+
 ## [1.36.1] - 2026-10-22
 
 ### Fixed
