@@ -18,6 +18,17 @@ done
 CHATI_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 source "$CHATI_DIR/lib_chat.sh"
+source "$CHATI_DIR/chati-common.sh"
+
+# Git-style subcommand dispatch: `chati <sub>` runs libexec/chati-<sub> and
+# exits. One entry point, each subcommand its own small script. A flag or a
+# bareword with no matching script falls through to the flag parser / REPL.
+_subpath=$(chati_resolve_subcommand "${1:-}")
+if [[ -n "$_subpath" ]]; then
+    shift
+    exec "$_subpath" "$@"
+fi
+unset _subpath
 
 CHATI_VERSION="1.35.0"
 
@@ -143,6 +154,9 @@ case "${1:-}" in
         show_version; exit 0 ;;
     --update|--upgrade)
         chati_self_update; exit $? ;;
+    --doctor)
+        # Alias for the `chati doctor` subcommand.
+        exec "$CHATI_DIR/libexec/chati-doctor" "${@:2}" ;;
     --check-update|--check)
         _lv=$(chati_latest_version) || { echo "chati: couldn't reach GitHub to check." >&2; exit 1; }
         if version_gt "$CHATI_VERSION" "$_lv"; then
