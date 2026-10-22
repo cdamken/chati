@@ -206,8 +206,8 @@ remove_all() {
     echo "     • OpenWebUI:        ~/openwebui"
     echo "     • Local SearXNG:    ~/searxng"
     echo "     • Logs:             ~/logs"
-    echo "     • PATH links:       ${brew_bin:-<brew bin>}/{chati,ailocal}"
-    echo "     • Autostart agent:  ~/Library/LaunchAgents/com.chati.ailocal.plist"
+    echo "     • PATH link:        ${brew_bin:-<brew bin>}/chati (and any old ailocal link)"
+    echo "     • Autostart agent:  ~/Library/LaunchAgents/com.chati.ailocal.plist (older installs)"
     echo "     • Repo state:       .env, .active_ollama_model.txt, .web_cache,"
     echo "                         conversation_histories/, ola_chat/instances/"
     echo "     • User data home:   ${CHATI_DATA_HOME:-$HOME/.local/share/chati}"
@@ -249,7 +249,7 @@ remove_all() {
     pkill -f 'granian.*searx\.webapp' >/dev/null 2>&1 || true
     ok "Services stopped"
 
-    step "Removing the 'chati' and 'ailocal' PATH links"
+    step "Removing the 'chati' PATH link (and any old 'ailocal' leftover)"
     if [[ -n "$brew_bin" ]]; then
         [[ -L "$brew_bin/chati" ]] && rm -f "$brew_bin/chati"
         [[ -L "$brew_bin/ailocal" ]] && rm -f "$brew_bin/ailocal"
@@ -642,20 +642,15 @@ fi
 WEBUI_STARTED=0
 if [[ "$WANT_WEBUI" -eq 1 ]]; then
     step "Installing OpenWebUI (browser UI)"
-    # Idempotent by default: the installer runs `uv pip install --upgrade`, which
-    # only downloads a new open-webui if PyPI has one and is a fast no-op
+    # Idempotent by default: install_webui.sh runs `uv pip install --upgrade`,
+    # which only downloads a new open-webui if PyPI has one and is a fast no-op
     # otherwise. This is what makes re-running setup (e.g. every `chati upgrade`)
     # cheap. --force wipes and reinstalls the venv from scratch (repair a broken
     # install); opt in with `setup.sh --force-webui`.
-    #
-    # NOTE: the venv install/upgrade (uv venv + uv pip, with the external DATA_DIR
-    # and secret-key fixes) is the LAST thing still living in ai_local/ailocal.
-    # Folding it into this script is the final step of retiring ailocal; until
-    # then setup calls it by full path (it is no longer on PATH or user-facing).
     if [[ "$FORCE_WEBUI" -eq 1 ]]; then
-        "$REPO_ROOT/ai_local/ailocal" upgrade webui --force
+        "$REPO_ROOT/installer/install_webui.sh" --force
     else
-        "$REPO_ROOT/ai_local/ailocal" upgrade webui
+        "$REPO_ROOT/installer/install_webui.sh"
     fi
     ok "OpenWebUI installed"
     step "Starting OpenWebUI (first boot can take a minute)"

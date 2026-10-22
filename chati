@@ -1410,7 +1410,7 @@ ensure_ollama_running() {
     fi
     echo "🚀 Starting 'ollama serve' (logs: ~/logs/ollama.log)..."
     mkdir -p "$HOME/logs"
-    # Apple Silicon perf tuning (see ailocal): flash attention + q8 KV cache.
+    # Apple Silicon perf tuning (Homebrew ollama's recommended flags): flash attention + q8 KV cache.
     export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
     export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
     nohup ollama serve </dev/null >"$HOME/logs/ollama.log" 2>&1 &
@@ -1838,7 +1838,7 @@ while true; do
                                     echo "   Its models differ — run /model to pick one available here."
                                 else
                                     echo "💾 Saved default Ollama → $OLLAMA_API (in .env), but can't reach it right now."
-                                    echo "   It'll be used once it's up (wake the machine, or 'ailocal awake on' there)."
+                                    echo "   It'll be used once it's up (wake or start that machine first)."
                                 fi
                             else
                                 if [[ -z "$h_target" ]]; then

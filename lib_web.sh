@@ -278,20 +278,26 @@ _searxng_local_endpoint() {
     return 1
 }
 
-# If a LOCAL SearXNG endpoint is configured but not answering, start it via
-# ailocal (which owns the granian/venv launch) and wait for it to come up. Only
-# acts on a local endpoint; with a remote-only config there is nothing to start.
-# Returns 0 when a local endpoint is up afterward, 1 otherwise (no local
-# endpoint, no ailocal, or it did not come up in time). Mirrors how chati
-# auto-starts a local Ollama.
+# If a LOCAL SearXNG endpoint is configured but not answering, start it via the
+# shared chati_start_searxng helper (which owns the granian/venv launch) and
+# wait for it to come up. Only acts on a local endpoint; with a remote-only
+# config there is nothing to start. Returns 0 when a local endpoint is up
+# afterward, 1 otherwise (no local endpoint, not installed, or it did not come
+# up in time). Mirrors how chati auto-starts a local Ollama.
 ensure_searxng_running() {
     local localurl; localurl=$(_searxng_local_endpoint) || return 1
     # Already up? nothing to do.
     curl -fsS --max-time 3 "$localurl/search?q=ping&format=json" >/dev/null 2>&1 && return 0
-    local ail="${CHATI_DIR:-$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/ai_local/ailocal"
-    [[ -x "$ail" ]] || return 1
+    # chati_start_searxng lives in chati-common.sh; source it if not loaded yet.
+    if ! declare -f chati_start_searxng >/dev/null 2>&1; then
+        local common="${CHATI_DIR:-$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/chati-common.sh"
+        [[ -r "$common" ]] || return 1
+        # shellcheck source=/dev/null
+        source "$common"
+    fi
+    chati_searxng_installed || return 1
     echo "🔎 Local SearXNG ($localurl) is down — starting it..." >&2
-    "$ail" start searxng >/dev/null 2>&1
+    chati_start_searxng >/dev/null 2>&1
     local i
     for i in $(seq 1 "${SEARXNG_START_WAIT:-15}"); do
         sleep 1
@@ -300,7 +306,7 @@ ensure_searxng_running() {
             return 0
         fi
     done
-    echo "   ⚠️  SearXNG didn't come up in time — check: ailocal status" >&2
+    echo "   ⚠️  SearXNG didn't come up in time — check: chati status" >&2
     return 1
 }
 
