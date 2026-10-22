@@ -7,6 +7,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.36.0] - 2026-10-22
+
+One command, three services, no `ailocal`. chati now manages the whole local
+stack itself, and the old `ailocal` service manager is gone.
+
+### Added
+- **A single `chati` entry point with a git-style dispatcher.** `chati <word>`
+  runs `libexec/chati-<word>`, so subcommands stay small and there is no monolith.
+- **Three service commands, by design the only ones you need:**
+  - `chati webui` starts the browser UI (and Ollama under it).
+  - `chati stop` stops OpenWebUI, SearXNG, and Ollama.
+  - `chati status` reports all three, read-only.
+  Ollama starts on demand when you launch chati; SearXNG starts on demand when
+  you use `/web`. There is deliberately **no** manual start/restart for them.
+- **`chati install` and `chati upgrade`** (both dashless): one front door to
+  `setup.sh` for first install and for pulling + applying the latest release.
+- **`chati doctor`** for a quick health check of the stack.
+- **`installer/install_webui.sh`** now owns the OpenWebUI venv install/upgrade,
+  plus `backup` and `restore` (integrity-checked before overwriting live data).
+  uv now **owns the Python** (`uv python install 3.11`), so a later
+  `brew autoremove` can't delete the interpreter out from under the venv.
+
+### Removed
+- **`ai_local/ailocal` is deleted.** Its OpenWebUI install/backup/restore moved
+  into `installer/install_webui.sh` (ported verbatim: external `DATA_DIR`, secret
+  key outside the repo, backup-before-upgrade). Its LAN-exposure and keep-awake
+  extras are dropped as outside the three-command model.
+- **Dashed command aliases are gone:** use `chati upgrade` (not `--update` /
+  `--upgrade`), `chati status`/`chati stop` for services, and `chati search`
+  stays as the headless query. This is the last release where `chati --upgrade`
+  still works, since updating *to* 1.36 runs the old code.
+
+### Changed
+- `/web` auto-start and `setup.sh` now drive SearXNG and OpenWebUI through the
+  new commands and `chati_start_searxng`, not through `ailocal`.
+
 ## [1.35.0] - 2026-10-21
 
 ### Added
