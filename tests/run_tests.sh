@@ -141,21 +141,26 @@ test_chati_version() {
 }
 run_test "chati --version prints a version" test_chati_version
 
-test_removed_dash_flags_dont_launch_chat() {
-    # Regression: `chati --upgrade` (and other removed dashed forms) used to fall
-    # through the flag case and silently launch the REPL. They must now error
-    # with guidance to the dashless verb and a non-zero exit, never start chat.
+test_bareword_and_unknown_dont_launch_chat() {
+    # Commands are dashed. A bare word (reserved for a future parameter, none
+    # defined yet) and an unknown --flag must NOT fall through to the chat REPL:
+    # they error with guidance and a non-zero exit. Only a bare `chati` starts chat.
     local out
-    out=$(./chati --upgrade </dev/null 2>&1); [[ $? -eq 2 ]] || { echo "--upgrade should exit 2" >&2; return 1; }
-    assert_match "$out" "chati upgrade" "--upgrade points to dashless verb" || return 1
+    # A known command typed WITHOUT its dash points at the dashed form.
+    out=$(./chati status </dev/null 2>&1); [[ $? -eq 2 ]] || { echo "bare 'status' should exit 2" >&2; return 1; }
+    assert_match "$out" "chati --status" "bare command points to the dashed form" || return 1
+    # An unrelated bare word is not a command.
+    out=$(./chati frobnicate </dev/null 2>&1); [[ $? -eq 2 ]] || { echo "bare 'frobnicate' should exit 2" >&2; return 1; }
+    assert_match "$out" "commands start with --" "bare word is rejected with guidance" || return 1
+    # An unknown dashed flag is reported as unknown.
     out=$(./chati --bogus </dev/null 2>&1); [[ $? -eq 2 ]] || { echo "--bogus should exit 2" >&2; return 1; }
-    assert_match "$out" "unknown option" "unknown flag is reported" || return 1
-    # And it must NOT have printed the REPL banner.
+    assert_match "$out" "unknown command" "unknown --flag is reported" || return 1
+    # None of these may print the REPL banner.
     if printf '%s' "$out" | grep -q "Current Chati Settings"; then
-        echo "a removed flag launched the chat REPL" >&2; return 1
+        echo "an invalid argument launched the chat REPL" >&2; return 1
     fi
 }
-run_test "removed dashed flags guide to the verb, never launch chat" test_removed_dash_flags_dont_launch_chat
+run_test "bare words and unknown flags guide, never launch chat" test_bareword_and_unknown_dont_launch_chat
 
 test_mola_help() {
     local out
@@ -175,7 +180,7 @@ test_chati_status_runs() {
     # Read-only: just pgrep checks, safe anywhere. The three services chati
     # cares about must all be reported.
     local out
-    out=$(./chati status 2>&1) || return 1
+    out=$(./chati --status 2>&1) || return 1
     assert_match "$out" "Ollama" "status reports Ollama" \
         && assert_match "$out" "OpenWebUI" "status reports OpenWebUI" \
         && assert_match "$out" "SearXNG" "status reports SearXNG"
@@ -1507,33 +1512,33 @@ test_resolve_subcommand() {
     local d; d=$(mktemp -d); mkdir -p "$d/libexec"
     printf '#!/bin/bash\necho hi\n' > "$d/libexec/chati-ping"; chmod +x "$d/libexec/chati-ping"
     printf '#!/bin/bash\n' > "$d/libexec/chati-noexec"   # not executable
-    # A reserved word (owned by the REPL case) must NOT resolve even if a
-    # libexec/chati-<word> exists — otherwise it would silently steal the word.
+    # A reserved command (handled inline by the REPL case) must NOT resolve even
+    # if a libexec/chati-<word> exists — otherwise it would silently steal it.
     printf '#!/bin/bash\n' > "$d/libexec/chati-search"; chmod +x "$d/libexec/chati-search"
     local save="$CHATI_DIR"; CHATI_DIR="$d"
-    local ok flag none noexec empty resv
-    ok=$(chati_resolve_subcommand ping)
-    flag=$(chati_resolve_subcommand --doctor)      # a flag never resolves
-    none=$(chati_resolve_subcommand nope)          # missing
-    noexec=$(chati_resolve_subcommand noexec)      # present but not +x
+    local ok bare none noexec empty resv
+    ok=$(chati_resolve_subcommand --ping)          # --command resolves
+    bare=$(chati_resolve_subcommand ping)          # a bare word is a parameter, never a command
+    none=$(chati_resolve_subcommand --nope)        # missing
+    noexec=$(chati_resolve_subcommand --noexec)    # present but not +x
     empty=$(chati_resolve_subcommand "")           # empty name
-    resv=$(CHATI_RESERVED_WORDS="search" chati_resolve_subcommand search)  # reserved
+    resv=$(CHATI_RESERVED_WORDS="search" chati_resolve_subcommand --search)  # reserved
     CHATI_DIR="$save"; rm -rf "$d"
-    assert_eq "$ok" "$d/libexec/chati-ping" "resolves an executable subcommand" \
-        && assert_eq "$flag" "" "a flag does not resolve" \
-        && assert_eq "$none" "" "a missing subcommand does not resolve" \
+    assert_eq "$ok" "$d/libexec/chati-ping" "a --command resolves to its libexec script" \
+        && assert_eq "$bare" "" "a bare word never resolves (reserved for a parameter)" \
+        && assert_eq "$none" "" "a missing command does not resolve" \
         && assert_eq "$noexec" "" "a non-executable file does not resolve" \
         && assert_eq "$empty" "" "empty name does not resolve" \
-        && assert_eq "$resv" "" "a reserved word does not resolve to libexec"
+        && assert_eq "$resv" "" "a reserved command does not resolve to libexec"
 }
-run_test "chati_resolve_subcommand: git-style dispatch rule" test_resolve_subcommand
+run_test "chati_resolve_subcommand: dashed-command dispatch rule" test_resolve_subcommand
 
-test_no_bareword_collides_with_libexec() {
-    # Every bareword the REPL handles inline in its TOP-LEVEL dispatch case
-    # (`case "${1:-}" in` ... bottom `esac`) must be reserved, so the dispatcher
-    # (which runs first) never silently shadows it with a libexec/chati-<word>.
-    # Scope to that block only: top-level arms are indented 4 spaces; nested
-    # case arms (deeper indent) and helper `case` blocks elsewhere are ignored.
+test_no_inline_command_collides_with_libexec() {
+    # Every --command the REPL handles inline in its TOP-LEVEL dispatch case
+    # (`case "${1:-}" in` ... bottom `esac`) must be reserved (by its bare name,
+    # no dashes), so the dispatcher — which runs first — never silently shadows
+    # it with a libexec/chati-<name>. Scope to that block only: top-level arms are
+    # indented 4 spaces; nested/helper case blocks elsewhere are ignored.
     # shellcheck source=/dev/null
     source "$PROJECT_DIR/chati-common.sh"
     local word hit=""
@@ -1546,13 +1551,15 @@ test_no_bareword_collides_with_libexec() {
             esac
         fi
     done < <(
+        # Pull the `--name` arms (e.g. `    --upgrade)`), strip the dashes and the
+        # trailing |) to get the bare name the reserved-word list must contain.
         awk '/^case "\$\{1:-\}" in/{f=1;next} f&&/^esac/{exit} f' "$PROJECT_DIR/chati" \
-            | grep -oE '^    [a-z][a-z0-9-]*[|)]' \
-            | tr -d ' |)' | sort -u
+            | grep -oE '^    --[a-z][a-z0-9-]*[|)]' \
+            | sed -E 's/^ *--//; s/[|)]$//' | sort -u
     )
-    assert_eq "$hit" "" "no inline bareword is shadowed by a libexec script"
+    assert_eq "$hit" "" "no inline --command is shadowed by a libexec script"
 }
-run_test "dispatcher: no bareword collides with a libexec script" test_no_bareword_collides_with_libexec
+run_test "dispatcher: no inline command collides with a libexec script" test_no_inline_command_collides_with_libexec
 
 test_searxng_urls_parse() {
     local out

@@ -5,7 +5,7 @@
 # Stands up a personal SearXNG under ~/searxng so chati can round-robin
 # web search across it AND your cloud instance (two source IPs → double
 # the upstream rate-limit budget). It starts on demand when you use /web,
-# and `chati status` / `chati stop` report and stop it.
+# and `chati --status` / `chati --stop` report and stop it.
 #
 # Why not Docker: by request. This is the supported manual install —
 # git clone + venv + granian + settings.yml. Pinned to Python 3.12

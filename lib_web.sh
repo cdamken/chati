@@ -200,7 +200,7 @@ _searxng_query_one() {
 # is DEGRADED — SearXNG replied 200 but every engine that would have
 # answered was unavailable (CAPTCHA / ban / rate-limit), so the empty is an
 # artifact of a broken search, not of the query. That distinction is the
-# whole point: a consumer (a pipeline, `chati search`) must be able to
+# whole point: a consumer (a pipeline, `chati --search`) must be able to
 # tell "searched, found nothing" from "search is broken and gave up", or it
 # runs on blindly. Kept separate from _searxng_query_one so it is unit-
 # testable from a JSON fixture with no live SearXNG.
@@ -306,7 +306,7 @@ ensure_searxng_running() {
             return 0
         fi
     done
-    echo "   ⚠️  SearXNG didn't come up in time — check: chati status" >&2
+    echo "   ⚠️  SearXNG didn't come up in time — check: chati --status" >&2
     return 1
 }
 

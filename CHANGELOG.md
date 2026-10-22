@@ -7,6 +7,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.37.0] - 2026-10-22
+
+Commands are dashed again. A command carries a `--`; a bare word is reserved
+for a parameter you pass (none defined yet, but the slot is kept free).
+
+### Changed
+- **Every command takes a dash:** `chati --install`, `--upgrade`, `--webui`,
+  `--stop`, `--status`, `--doctor`, `--search <query>`, `--check-update`, plus
+  `--help`/`--version`. This replaces the dashless verbs from 1.36. The rule is
+  simple: with a dash it's a command, without a dash it's data for a command, so
+  the bare-word position stays open for a future parameter.
+- A known command typed without its dash (e.g. `chati status`) now prints a
+  one-line pointer to the dashed form and exits non-zero; a bare word that is no
+  command is rejected the same way; neither ever drops you into the chat REPL.
+  Only a bare `chati` with no arguments starts the interactive chat.
+- The dispatcher resolves `--name` to `libexec/chati-name`; docs, help text and
+  the README are updated throughout. The README's stale `ailocal` sections (gone
+  since 1.36) are rewritten to the three-command model, with manual equivalents
+  for the dropped server conveniences (LAN exposure, autostart, keep-awake).
+
+### Note
+- This is the last release reachable with the dashless `chati upgrade`: run it
+  on a 1.36 box to pull this update; afterwards the command is `chati --upgrade`.
+
 ## [1.36.2] - 2026-10-22
 
 ### Fixed

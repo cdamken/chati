@@ -1,9 +1,9 @@
 #!/bin/bash
 #==============================================================================
-# chati-doctor — one-glance health check for a chati install.
+# chati-doctor — one-glance health check for a chati --install.
 #==============================================================================
 # chati-skill is not used here; this is a libexec subcommand, run as:
-#     chati doctor        (or the alias: chati --doctor)
+#     chati --doctor
 #
 # Checks the core (chati version, Ollama reachable, models present) and the
 # optional pieces (SearXNG endpoints, OpenWebUI). Prints a table and exits 0
@@ -15,7 +15,7 @@
 #==============================================================================
 set -o pipefail
 
-# Resolve the real repo dir (follow symlinks) so `chati doctor` works from a
+# Resolve the real repo dir (follow symlinks) so `chati --doctor` works from a
 # PATH symlink too. libexec/ lives one level below the repo root.
 _src="${BASH_SOURCE[0]}"
 while [[ -L "$_src" ]]; do
@@ -45,8 +45,8 @@ if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
 fi
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    echo "Usage: chati doctor"
-    echo "Report the health of this chati install (version, Ollama, models, SearXNG, OpenWebUI)."
+    echo "Usage: chati --doctor"
+    echo "Report the health of this chati --install (version, Ollama, models, SearXNG, OpenWebUI)."
     exit 0
 fi
 
@@ -56,7 +56,7 @@ CHATI_VERSION="$(cat "$CHATI_DIR/VERSION" 2>/dev/null || echo "?")"
 API="$(chati_ollama_api)"
 rc=0
 
-echo "chati doctor — $(date '+%d.%m.%Y %H:%M')"
+echo "chati --doctor — $(date '+%d.%m.%Y %H:%M')"
 echo
 
 # --- chati version ---
@@ -100,7 +100,7 @@ WEBUI_HOST="${WEBUI_HOST:-127.0.0.1}"
 if curl -fsS --max-time 4 "http://$WEBUI_HOST:$WEBUI_PORT/health" >/dev/null 2>&1; then
     _doctor_line ok "OpenWebUI" "up en http://$WEBUI_HOST:$WEBUI_PORT"
 else
-    _doctor_line warn "OpenWebUI" "no responde en :$WEBUI_PORT — opcional (chati webui start)"
+    _doctor_line warn "OpenWebUI" "no responde en :$WEBUI_PORT — opcional (chati --webui)"
 fi
 
 echo

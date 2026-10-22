@@ -1,10 +1,10 @@
 #!/bin/bash
 # summary: muestra qué servicios locales están corriendo (Ollama, OpenWebUI, SearXNG)
 #==============================================================================
-# chati status — one glance at the local AI services.
+# chati --status — one glance at the local AI services.
 #
 # Ollama starts on its own when you launch chati; SearXNG starts on its own when
-# you use /web; OpenWebUI is the one you start by hand (`chati webui`). This just
+# you use /web; OpenWebUI is the one you start by hand (`chati --webui`). This just
 # reports which are up — it never starts anything. Pure bash + curl + jq.
 #==============================================================================
 set -o pipefail
@@ -21,7 +21,7 @@ unset _src _dir
 source "$CHATI_DIR/chati-common.sh"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    echo "Usage: chati status"
+    echo "Usage: chati --status"
     echo "Report which local AI services are running (Ollama, OpenWebUI, SearXNG)."
     exit 0
 fi
@@ -40,7 +40,7 @@ fi
 if chati_svc_running "$CHATI_WEBUI_PROC"; then
     echo "OpenWebUI: RUNNING   (http://${WEBUI_HOST:-127.0.0.1}:${WEBUI_PORT:-8888})"
 else
-    echo "OpenWebUI: stopped   (start it with: chati webui)"
+    echo "OpenWebUI: stopped   (start it with: chati --webui)"
 fi
 
 # --- SearXNG (auto-starts with /web) ---

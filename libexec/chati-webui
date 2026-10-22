@@ -1,13 +1,13 @@
 #!/bin/bash
 # summary: prende lo que OpenWebUI necesita (Ollama) y abre OpenWebUI
 #==============================================================================
-# chati webui — start the OpenWebUI stack.
+# chati --webui — start the OpenWebUI stack.
 #
 # OpenWebUI needs the engine, so this starts Ollama if it's down, then OpenWebUI
 # itself, and wires the UI's web search to the local SearXNG when it's present.
 # It does NOT force-start SearXNG: that's optional and comes up on demand (/web),
 # and a broken/slow local SearXNG shouldn't hang bringing the UI up. It never
-# stops anything — use `chati stop` to turn it all off, `chati status` to look.
+# stops anything — use `chati --stop` to turn it all off, `chati --status` to look.
 #
 # Carries the hard-won OpenWebUI fixes verbatim: external DATA_DIR (so data
 # survives a --force reinstall), a secret key kept outside the repo, the
@@ -28,9 +28,9 @@ unset _src _dir
 source "$CHATI_DIR/chati-common.sh"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    echo "Usage: chati webui"
+    echo "Usage: chati --webui"
     echo "Start the OpenWebUI stack (Ollama + SearXNG-if-installed + OpenWebUI)."
-    echo "Stop everything with 'chati stop'; see state with 'chati status'."
+    echo "Stop everything with 'chati --stop'; see state with 'chati --status'."
     exit 0
 fi
 

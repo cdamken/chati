@@ -15,26 +15,26 @@ if [[ -z "${CHATI_DIR:-}" ]]; then
     CHATI_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
-# Words the REPL's own flag `case` still owns (bareword subcommands handled
-# inline, e.g. `chati search`). The dispatcher runs BEFORE that case, so a
-# libexec/chati-<word> with one of these names would silently steal the word.
-# A reserved name never resolves to libexec; it stays with the case until the
-# inline code is migrated out (then drop it from here — a bareword lives in ONE
-# place). Space-separated so bash 3.2 can match it without an array.
-CHATI_RESERVED_WORDS="${CHATI_RESERVED_WORDS:-search upgrade check-update}"
+# Command names the REPL's own flag `case` still owns (handled inline, e.g.
+# `--search`). The dispatcher runs BEFORE that case, so a libexec/chati-<word>
+# with one of these names would silently steal it. A reserved name never
+# resolves to libexec; it stays with the case. Names are WITHOUT the leading
+# dashes. Space-separated so bash 3.2 can match it without an array.
+CHATI_RESERVED_WORDS="${CHATI_RESERVED_WORDS:-help version search upgrade check-update}"
 
-# Git-style dispatch: given a subcommand name, echo the path of its executable
-# libexec script if it exists, else nothing. A leading-dash arg (a flag), an
-# empty name, or a reserved word (owned by the REPL case) never resolves. This
-# is the single rule the dispatcher uses.
+# Dispatch rule: commands are DASHED (`--install`, `--webui`, ...), so a plain
+# bareword is reserved for a future parameter and never names a command. Given
+# the first arg, echo the path of the matching libexec/chati-<name> script if it
+# is a `--name` that exists and isn't reserved; otherwise echo nothing.
 chati_resolve_subcommand() {
-    local name="${1:-}" w
-    [[ -n "$name" && "$name" != -* ]] || return 0
+    local name="${1:-}" base w
+    [[ "$name" == --?* ]] || return 0      # not a --command → nothing
+    base="${name#--}"
     for w in $CHATI_RESERVED_WORDS; do
-        [[ "$name" == "$w" ]] && return 0
+        [[ "$base" == "$w" ]] && return 0
     done
-    [[ -x "$CHATI_DIR/libexec/chati-$name" ]] \
-        && printf '%s\n' "$CHATI_DIR/libexec/chati-$name"
+    [[ -x "$CHATI_DIR/libexec/chati-$base" ]] \
+        && printf '%s\n' "$CHATI_DIR/libexec/chati-$base"
 }
 
 # List the available subcommand names (from libexec/chati-*), one per line.
@@ -61,15 +61,15 @@ chati_load_env() {
 # The configured Ollama base URL (default local).
 chati_ollama_api() { printf '%s' "${OLLAMA_API:-http://localhost:11434}"; }
 
-# --- Local service lifecycle (powers `chati status` and `chati stop`) ---------
+# --- Local service lifecycle (powers `chati --status` and `chati --stop`) ---------
 # chati keeps the local AI services simple: Ollama starts on demand when you
 # launch chati, SearXNG starts on demand when you use /web, and OpenWebUI is the
-# one you start explicitly (`chati webui`). There is NO manual start/restart for
-# Ollama or SearXNG by design. `chati stop` frees the machine; `chati status`
+# one you start explicitly (`chati --webui`). There is NO manual start/restart for
+# Ollama or SearXNG by design. `chati --stop` frees the machine; `chati --status`
 # shows what's up. These constants + two helpers are the shared core they build
 # on (and fold the three near-identical stop loops ailocal carried into one).
 # These constants are consumed by the libexec service scripts that source this
-# file (chati status / chati stop), so shellcheck can't see the use here.
+# file (chati --status / chati --stop), so shellcheck can't see the use here.
 CHATI_LOG_DIR="${CHATI_LOG_DIR:-$HOME/logs}"
 # Match "ollama serve" only at a word boundary, so "myollama serve" isn't hit.
 # shellcheck disable=SC2034  # used by libexec/chati-status and chati-stop
@@ -95,7 +95,7 @@ chati_svc_running() { pgrep -f "$1" >/dev/null 2>&1; }
 
 # Start the Ollama engine if it isn't already up. Ollama has no standalone
 # start command by design (it comes up when you launch chati); this is the one
-# place that logic lives, shared by chati's own startup and `chati webui`.
+# place that logic lives, shared by chati's own startup and `chati --webui`.
 # Waits for the HTTP API (not just the process) so callers can use it right away.
 chati_start_ollama() {
     if chati_svc_running "$CHATI_OLLAMA_PROC"; then echo "Ollama is already running"; return 0; fi

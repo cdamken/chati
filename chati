@@ -30,7 +30,7 @@ if [[ -n "$_subpath" ]]; then
 fi
 unset _subpath
 
-CHATI_VERSION="1.36.2"
+CHATI_VERSION="1.37.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -131,50 +131,49 @@ check_for_update_quiet() {
     printf '%s' "$now" > "$f" 2>/dev/null || true
     local latest; latest=$(chati_latest_version) || return 0
     version_gt "$CHATI_VERSION" "$latest" \
-        && echo "🆕 chati v$latest is available (you have $CHATI_VERSION). Update:  chati upgrade"
+        && echo "🆕 chati v$latest is available (you have $CHATI_VERSION). Update:  chati --upgrade"
     return 0
 }
 
 # Parse CLI flags up-front so `chati --help`, `chati --version` and the
-# headless `chati search` subcommand work without entering the REPL.
+# headless `chati --search` command work without entering the REPL.
 case "${1:-}" in
     -h|--help)
-        echo "Usage: chati [command]"
+        echo "Usage: chati [--command]"
         echo "With no command, starts the interactive Ollama chat (type /h inside for the command list)."
         echo ""
-        echo "Commands (one front door, no dashes):"
-        echo "  install [flags]     Install chati and its services (flags pass to the installer)."
-        echo "  upgrade             Update this checkout to the latest release (git pull + re-apply)."
-        echo "  webui               Start the OpenWebUI stack (Ollama + OpenWebUI)."
-        echo "  stop                Stop the local services (OpenWebUI, SearXNG, Ollama)."
-        echo "  status              Show which local services are running."
-        echo "  doctor              Report the health of this install."
-        echo "  search <query...>   Headless web search via the SearXNG backend (no REPL)."
-        echo ""
-        echo "  check-update        Check GitHub for a newer release (prints, no changes)."
-        echo "  -v, --version       Print the version."
+        echo "Commands (dashed, so a bare word stays free for a parameter):"
+        echo "  --install [flags]    Install chati and its services (flags pass to the installer)."
+        echo "  --upgrade            Update this checkout to the latest release (git pull + re-apply)."
+        echo "  --webui              Start the OpenWebUI stack (Ollama + OpenWebUI)."
+        echo "  --stop               Stop the local services (OpenWebUI, SearXNG, Ollama)."
+        echo "  --status             Show which local services are running."
+        echo "  --doctor             Report the health of this install."
+        echo "  --search <query...>  Headless web search via the SearXNG backend (no REPL)."
+        echo "  --check-update       Check GitHub for a newer release (prints, no changes)."
+        echo "  -v, --version        Print the version."
         exit 0 ;;
     -v|--version)
         show_version; exit 0 ;;
-    upgrade)
-        # One name, no dash (matches `chati install`). "upgrade" is reserved so
-        # the dispatcher never routes it to a libexec script.
+    --upgrade)
+        # "upgrade" is reserved so the dispatcher never routes --upgrade to a
+        # libexec script; it is handled inline (it needs chati's sourced helpers).
         chati_self_update; exit $? ;;
-    check-update)
+    --check-update)
         _lv=$(chati_latest_version) || { echo "chati: couldn't reach GitHub to check." >&2; exit 1; }
         if version_gt "$CHATI_VERSION" "$_lv"; then
-            echo "🆕 chati v$_lv is available (you have $CHATI_VERSION). Update:  chati upgrade"
+            echo "🆕 chati v$_lv is available (you have $CHATI_VERSION). Update:  chati --upgrade"
         else
             echo "✅ chati is up to date ($CHATI_VERSION; latest release v$_lv)."
         fi
         exit 0 ;;
-    search)
+    --search)
         # Headless one-shot web search. Reuses lib_web.sh's web_search (sourced
         # via lib_chat.sh above), so it hits the exact same SearXNG endpoints and
         # formatting as the interactive /web pipeline — no REPL, no LLM call.
         shift
         if [[ $# -eq 0 ]]; then
-            echo "Usage: chati search <query...>" >&2
+            echo "Usage: chati --search <query...>" >&2
             echo "Headless web search via chati's SearXNG backend; prints results and exits." >&2
             exit 2
         fi
@@ -207,22 +206,21 @@ case "${1:-}" in
         ;;
 esac
 
-# Any leading-dash argument that reached here is an unknown option: -h/--help,
-# -v/--version and the dashless verbs were all handled above. Do NOT fall
-# through to the chat REPL — that silently swallowed typos and old muscle memory
-# like `chati --upgrade`, launching chat instead of upgrading. The dashed
-# command forms were removed in 1.36; point at the dashless verb and exit.
-if [[ "${1:-}" == -* ]]; then
+# The dispatcher already ran every --command backed by a libexec script, and the
+# case above handled --help/--version/--upgrade/--check-update/--search. Anything
+# still here is not a valid command. Commands are DASHED on purpose, so a bare
+# word is left free for a future parameter (none defined yet). Do NOT fall
+# through to the chat REPL — only a bare `chati` with no args starts it.
+if [[ -n "${1:-}" ]]; then
     case "$1" in
-        --update|--upgrade)     echo "chati: '$1' was removed in 1.36 — use:  chati upgrade" >&2 ;;
-        --install)              echo "chati: '$1' was removed in 1.36 — use:  chati install" >&2 ;;
-        --doctor)               echo "chati: '$1' was removed in 1.36 — use:  chati doctor" >&2 ;;
-        --check|--check-update) echo "chati: '$1' was removed in 1.36 — use:  chati check-update" >&2 ;;
-        --search)               echo "chati: '$1' was removed in 1.36 — use:  chati search <query...>" >&2 ;;
-        --status)               echo "chati: '$1' was removed in 1.36 — use:  chati status" >&2 ;;
-        --stop)                 echo "chati: '$1' was removed in 1.36 — use:  chati stop" >&2 ;;
-        --webui)                echo "chati: '$1' was removed in 1.36 — use:  chati webui" >&2 ;;
-        *)                      echo "chati: unknown option '$1' (try: chati --help)" >&2 ;;
+        --update)
+            echo "chati: use  chati --upgrade" >&2 ;;
+        --*)
+            echo "chati: unknown command '$1' (try: chati --help)" >&2 ;;
+        upgrade|install|webui|stop|status|doctor|search|check-update)
+            echo "chati: commands take a dash now — use:  chati --$1" >&2 ;;
+        *)
+            echo "chati: '$1' is not a command; commands start with -- (try: chati --help)" >&2 ;;
     esac
     exit 2
 fi

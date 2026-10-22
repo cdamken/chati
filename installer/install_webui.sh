@@ -3,8 +3,8 @@
 # install_webui.sh — install / upgrade / back up / restore local OpenWebUI
 #==============================================================================
 # The browser UI for chati, under ~/openwebui. This is the venv install and
-# the data safety net; starting and stopping it is `chati webui` / `chati stop`.
-# setup.sh calls this during install and on every `chati upgrade`.
+# the data safety net; starting and stopping it is `chati --webui` / `chati --stop`.
+# setup.sh calls this during install and on every `chati --upgrade`.
 #
 # Ported verbatim from the old `ailocal upgrade/backup/restore webui` so no
 # hard-won fix is lost: external DATA_DIR (data survives a --force reinstall),
@@ -171,7 +171,7 @@ restore_backup() {
 
     [[ -f "$BACKUP_SLOT/.webui_secret_key" ]] && cp "$BACKUP_SLOT/.webui_secret_key" "$WEBUI_SECRET_KEY_FILE"
 
-    log "Restore completed. Start it again with: chati webui"
+    log "Restore completed. Start it again with: chati --webui"
 }
 
 upgrade_webui() {

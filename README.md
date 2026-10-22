@@ -55,7 +55,7 @@ The point of this project is to show how far a language from 1989 gets when it o
 | `sed` / `awk` / `grep` | Text munging everywhere, including statistical language detection for voice selection |
 | `ollama` | The actual LLM inference |
 
-The rule is **bash first, tools proudly visible** — not "no other languages". When a task genuinely outgrows bash + a tool, a helper in another language is fine: `docr`'s PDF graphics engine is Groovy because that's where the right library lives. The chat path itself needs nothing beyond bash + `jq` + `curl` + `lynx`.
+The rule is **bash first, tools proudly visible** — not "no other languages". When a task genuinely outgrows bash + a tool, a helper in another language is fine: the macOS OCR engine is a small Swift program (`docr/ocr_vision.swift`) because Apple's Vision framework is where the right capability lives. The chat path itself needs nothing beyond bash + `jq` + `curl` + `lynx`.
 
 ## Architecture
 
@@ -66,12 +66,12 @@ This project provides a robust terminal-based chat experience with session manag
 The chat stack is **pure bash** — the only runtime dependencies are `jq`, `curl`, and `lynx` (plus macOS built-ins like `say`). There is no Python in the chat path.
 
 - **`chati`**: The main interactive CLI loop (version via `chati --version`).
-- **`ai_local/ailocal`**: Unified local AI service manager — start/stop Ollama and OpenWebUI, upgrade both, and manage OpenWebUI backups.
+- **`libexec/chati-*`**: The local service commands behind `chati --webui` / `--stop` / `--status` / `--doctor`. Ollama starts on demand when you launch chati and SearXNG when you use `/web`; OpenWebUI is the one you start explicitly. OpenWebUI's install/upgrade/backup/restore lives in `installer/install_webui.sh`.
 - **`ola_chat/`**: Backend logic for Ollama integration (all bash).
   - `ola`: Streaming chat backend — builds the payload and parses the token stream with inline `jq`.
   - `mola`: Advanced session manager (rename, autorename, delete, etc.).
   - `ola_model`: Model management (pull, switch, list).
-- **OCR**: chati picks the best engine per file — **Apple Vision** on macOS for images (incl. HEIC) and scanned PDFs (native, GPU/Neural-Engine fast, far better than tesseract on real photos; built by `setup.sh` from `docr/ocr_vision.swift`), **`pdftotext`** for digital PDFs (instant, exact), and **`docr/`** (a tesseract wrapper with quality-profile detection + a Groovy PDF helper) as the portable fallback. Force one with `CHATI_OCR_ENGINE=auto|vision|tesseract`.
+- **OCR**: chati picks the best engine per file — **Apple Vision** on macOS for images (incl. HEIC) and scanned PDFs (native, GPU/Neural-Engine fast, far better than tesseract on real photos; built by `setup.sh` from `docr/ocr_vision.swift`), **`pdftotext`** for digital PDFs (instant, exact), and **`docr/`** (a tesseract wrapper with quality-profile detection) as the portable fallback. Force one with `CHATI_OCR_ENGINE=auto|vision|tesseract`.
 - **`lib_chat.sh`**: Shared configuration + core helpers (model selection, session files, voice detection, one-shot Ollama calls).
 - **`lib_web.sh`**: Web research helpers — SearXNG search, URL fetch via lynx, LLM query decomposition. All `curl` + `jq`.
 - **Web search backend**: a self-hosted **SearXNG** metasearch instance — see [SEARXNG_SETUP.md](installer/SEARXNG_SETUP.md) for the full server-side install and maintenance playbook. `/w` and the decomposition-RAG pipeline talk to it instead of scraping DuckDuckGo (which rate-limits aggressively).
@@ -174,15 +174,15 @@ chati
 > - `./setup.sh --client heather --searxng http://heather:8890` — **full client**: chat + local OCR (`/ocr`, `/file` on images/PDFs) + `/web` pointed at a remote SearXNG. Installs the OCR tools locally; the AI steps of `/web` run on the remote Ollama.
 > - `./setup.sh --client-minimal heather` — **bare client**: only `curl`, `jq`, `lynx` and the `ollama` CLI (tens of MB, no OCR, no `/web`). Chat needs just `bash` + `curl` + `jq`.
 >
-> `/web` never needs a *local* SearXNG — it's a URL you point at (`SEARXNG_URLS` in `.env`). Share the server's SearXNG by starting it network-exposed there (`SEARXNG_LOCAL_HOST=0.0.0.0 ailocal restart searxng`), or point at any other instance.
+> `/web` never needs a *local* SearXNG — it's a URL you point at (`SEARXNG_URLS` in `.env`). Share the server's SearXNG by starting it network-exposed there (`SEARXNG_LOCAL_HOST=0.0.0.0` in the environment when it comes up), or point at any other instance.
 
 ### 5. OpenWebUI — browser UI on top of Ollama
 
 `setup.sh` already installed and started this for you (unless you used `--minimal`) — open **http://127.0.0.1:8888**. It runs **login-less** (`WEBUI_AUTH=False`) since it's a local single-user instance, and its built-in web search is auto-wired to the local SearXNG. To require login instead, start it with `WEBUI_AUTH=True` (decide before first boot — OpenWebUI blocks turning auth back on once its DB exists). If you skipped it and want it later:
 
 ```bash
-./ai_local/ailocal upgrade webui --force
-./ai_local/ailocal start
+chati --install --force-webui
+chati --webui
 ```
 
 The first line installs OpenWebUI into `~/openwebui/.venv`; the second starts Ollama + OpenWebUI and opens `http://127.0.0.1:8888`.
@@ -206,13 +206,20 @@ git reset --hard origin/main
 
 No build step — the scripts run straight from the checkout, so you're on the new version the moment the pull finishes.
 
-**2. Ollama and OpenWebUI (the services, not this code)** — via `ailocal`:
+Or let chati do both at once — pull the latest release **and** re-apply setup (which upgrades OpenWebUI):
 
 ```bash
-./ai_local/ailocal upgrade ollama   # Ollama via Homebrew + refresh models (auto-restarts)
-./ai_local/ailocal upgrade webui    # OpenWebUI via uv
-./ai_local/ailocal upgrade all      # both
+chati --upgrade
 ```
+
+**2. Ollama and OpenWebUI (the services, not this code):**
+
+```bash
+brew upgrade ollama && chati --stop   # new Ollama binary; next chati launch auto-starts it
+chati --install                       # re-applies setup: upgrades OpenWebUI via uv (idempotent)
+```
+
+OpenWebUI's upgrade snapshots your data first; if a new build misbehaves, `installer/install_webui.sh restore` brings back the pre-upgrade state.
 
 ## Uninstalling (`--remove-all`)
 
@@ -228,142 +235,72 @@ It deliberately **keeps Homebrew and its packages** (`jq`, `curl`, `ollama`, `te
 
 > Only the repo checkout and your Homebrew toolchain survive — everything the installer created is gone. This is the teardown half of an install/uninstall test cycle: `./setup.sh` → use it → `./setup.sh --remove-all`.
 
-## AI Local Service Manager (`ai_local/ailocal`)
+## Managing the local services
 
-Manages Ollama and OpenWebUI as local services.
-
-> `setup.sh` symlinks `ailocal` onto your PATH, so you can run **`ailocal …`** from any directory. The `./ai_local/ailocal …` form used in the examples below is equivalent (and works even without the PATH link).
-
-### Dependencies
-
-- `ollama` (via Homebrew)
-- `uv` + `python3.11` (for OpenWebUI)
-- `curl`, `jq`
-
-### Service Management
-
-The CLI follows a `VERB [TARGET]` standard (target: `ollama` | `webui` | `all`, default `all`). The pre-2.1 fused forms (`startwebui`, `stopall`, `list-backups`, …) still work as compatibility aliases.
+chati manages the whole local AI stack itself — there is no separate service manager. Ollama starts on demand when you launch chati, SearXNG starts when you use `/web`, and OpenWebUI is the one you start explicitly.
 
 ```bash
-./ai_local/ailocal status               # Show Ollama and OpenWebUI status
-./ai_local/ailocal start                # Start Ollama then OpenWebUI
-./ai_local/ailocal start ollama         # Start Ollama only
-./ai_local/ailocal start webui          # Start OpenWebUI (auto-starts Ollama if needed)
-./ai_local/ailocal stop                 # Stop both services
-./ai_local/ailocal stop webui           # Stop OpenWebUI only
-./ai_local/ailocal restart ollama       # bounce Ollama (required after brew upgrade ollama)
+chati --webui     # start OpenWebUI (brings Ollama up under it); opens http://127.0.0.1:8888
+chati --stop      # stop OpenWebUI, SearXNG and Ollama — free the machine
+chati --status    # show which of the three are running (read-only)
+chati --doctor    # health check: version, Ollama, models, SearXNG, OpenWebUI
 ```
 
-OpenWebUI runs at `http://127.0.0.1:8888` and opens automatically in the browser on start.
+There is deliberately **no** manual start/restart for Ollama or SearXNG — they come up on their own. `chati --webui` restarts the stack if you need to bounce it (for example after `brew upgrade ollama`: run `chati --stop` so the next launch spawns the new runner binary, or just `chati --webui`).
 
-### Upgrading
+### Installing / upgrading OpenWebUI
 
-Every `upgrade webui` **snapshots the current state first** (into the single backup slot). If the result misbehaves, `./ai_local/ailocal restore` brings back the pre-upgrade state — that's the whole recovery story.
+The OpenWebUI venv is installed and upgraded by `installer/install_webui.sh`, which `setup.sh` runs on install and on every `chati --upgrade`:
 
 ```bash
-./ai_local/ailocal upgrade ollama              # Upgrade Ollama via Homebrew + refresh all models (auto-restarts the service)
-./ai_local/ailocal upgrade webui               # Upgrade OpenWebUI via uv (reports version before → after)
-./ai_local/ailocal upgrade webui --force       # Reinstall the venv from scratch (data lives outside, stays safe)
-./ai_local/ailocal upgrade all                 # Upgrade both
+chati --install                      # idempotent: uv pip install --upgrade open-webui
+chati --install --force-webui        # reinstall the venv from scratch (data stays safe)
+installer/install_webui.sh restore   # roll back to the pre-upgrade snapshot
 ```
 
-> **Note:** `ailocal` exports `DATA_DIR=~/openwebui/data` — the variable OpenWebUI actually reads — so the database lives **outside** the venv and survives `--force` reinstalls. (For over a year the script exported `WEBUI_DATA_DIR`, which OpenWebUI ignores; data silently lived inside the venv and died with every force-reinstall.) The plain upgrade prints the installed version before/after so a no-op upgrade is visible instead of silently "successful".
+Every upgrade **snapshots the current state first** (into a single backup slot). `install_webui.sh` exports `DATA_DIR=~/openwebui/data` — the variable OpenWebUI actually reads — so the database lives **outside** the venv and survives `--force` reinstalls. uv **owns** the Python (a managed 3.11), so a later `brew autoremove` can't delete the interpreter out from under the venv.
 
-> **Note:** `upgrade ollama` restarts the service automatically after the brew upgrade. A server started before the upgrade spawns the new runner binary with old flags and every model load fails with "unknown runner engine" — if you upgrade ollama by hand, run `./ai_local/ailocal restart ollama` afterwards.
+Environment knobs: `WEBUI_START_TIMEOUT` (default 180s — first boot after an upgrade migrates the DB and can be slow), `CHATI_NO_OPEN` (skip auto-opening the browser). Requires `uv` (`brew install uv`); it manages a Python 3.11 virtualenv at `~/openwebui/.venv`.
 
-Environment knobs: `WEBUI_START_TIMEOUT` (default 180s — first boot after an upgrade migrates the DB and can be slow), `AILOCAL_NO_OPEN` (skip auto-opening the browser).
+### Backup & restore (OpenWebUI data)
 
-> **Note:** `upgrade ollama` requires `ollama` to be in PATH. If you installed it as a Mac app rather than via Homebrew, ensure `/usr/local/bin/ollama` or the app's binary is on your `$PATH`.
-
-> **Note:** `upgrade webui` requires `uv` to be installed. Install with `brew install uv`. It manages a Python 3.11 virtualenv at `~/openwebui/.venv`.
-
-### Backup & Restore
-
-One backup slot, by design: it always holds the state before the last upgrade (or the last manual `backup`). No backup zoo to curate — upgrade replaces it, restore goes back to it.
+One backup slot, by design: it always holds the state before the last upgrade (or the last manual `backup`). Upgrade replaces it; restore goes back to it.
 
 ```bash
-./ai_local/ailocal backup                      # Snapshot now, replacing the previous one
-./ai_local/ailocal restore                     # Go back to the snapshot (asks for confirmation)
-./ai_local/ailocal restore --yes               # Same, non-interactive
-./ai_local/ailocal status                      # shows the snapshot age and size
+installer/install_webui.sh backup         # snapshot now, replacing the previous one
+installer/install_webui.sh restore        # go back to the snapshot (asks for confirmation)
+installer/install_webui.sh restore --yes  # same, non-interactive
 ```
 
 The slot lives at `~/openwebui_backups/previous/` and includes the database (consistent `sqlite3 .backup` snapshot), the data directory and the secret key.
 
-### Auto-start at login
+### Running on an always-on server
 
-By default the services only run when you start them (`ailocal start`, or `chati`/`setup.sh`). To have Ollama + OpenWebUI + SearXNG come up **automatically every time you log in**, install a LaunchAgent:
+chati 1.36 dropped the old `ailocal` conveniences for autostart / LAN exposure / keep-awake in favor of the three-command model. On a shared server you set the same things up directly:
 
-```bash
-ailocal autostart on       # start all services at login
-ailocal autostart status   # is it enabled?
-ailocal autostart off      # remove it
-```
+- **Expose Ollama on the LAN / Tailscale.** Start it bound to all interfaces: `OLLAMA_HOST=0.0.0.0:11434 ollama serve`. On Tailscale, connect from clients by the MagicDNS name (`export OLLAMA_API=http://your-mac.your-tailnet.ts.net:11434`) — stable across IP changes and private to your devices.
+  > ⚠️ **Ollama has no authentication.** Only expose it on a trusted network or over Tailscale. This exposes only Ollama; OpenWebUI/SearXNG stay on localhost.
+- **Start at login.** Add your own `~/Library/LaunchAgents` plist that runs `ollama serve` (and `chati --webui` if you want the UI up) through a login shell.
+- **Keep the Mac awake while serving.** `caffeinate -s` (no sudo; only while on AC power), or system-level `sudo pmset -c sleep 0 disablesleep 1` for a plugged-in server. A Mac in low-power sleep can look alive (`/api/tags` responds) yet return empty generations.
 
-The agent runs `ailocal start` through a login shell. Output goes to `~/logs/autostart.log`. `./setup.sh --remove-all` removes the agent.
-
-### Reaching Ollama from other computers (LAN)
-
-By default Ollama listens on `127.0.0.1` (this Mac only). To let other machines on your network use it:
-
-```bash
-ailocal lan on       # expose the Ollama API on 0.0.0.0
-ailocal lan status   # show current exposure + bind address
-ailocal lan off      # back to localhost only
-```
-
-`lan on` sets `OLLAMA_HOST=0.0.0.0` via `launchctl setenv` (so the whole login session — terminal **and** the autostart agent — sees it) and persists the choice in `~/.config/chati/ollama_lan`, so **every `ailocal start` (including autostart at login) brings Ollama up exposed** until you run `lan off`. It binds *all* interfaces, so it's reachable both on the LAN and over **Tailscale** — and `lan on`/`lan status` print both addresses.
-
-**On Tailscale? Use the MagicDNS name — it's the robust choice.** Binding `0.0.0.0` is immune to IP changes, and connecting by the Tailscale name (e.g. `http://your-mac.your-tailnet.ts.net:11434`) is stable even if the IP changes. It also means access is private and encrypted, limited to your own devices — a good answer to Ollama having no auth. On the client machine:
-
-```bash
-export OLLAMA_API=http://your-mac.your-tailnet.ts.net:11434
-```
-
-> ⚠️ **Ollama has no authentication.** On the raw LAN, anyone who can reach the port can use or delete your models — only enable on a trusted network, or rely on Tailscale (private, your devices only). This exposes only Ollama; OpenWebUI/SearXNG stay localhost.
-
-### Remote server refuses connections after an Ollama upgrade
-
-If a remote server suddenly stops answering from other machines — `localhost` on the server still works, but clients get `Connection reset by peer` (errno 54) or `Empty reply from server` — the usual cause is a **stale `ollama serve` left running the old binary after an upgrade**. It keeps listening on `*:11434` and accepts loopback, but drops every non-loopback (LAN/Tailscale) connection. It looks like a firewall problem, but it is not.
-
-Fix it by restarting the server so the current binary takes over:
+**Stale bind after an Ollama upgrade or after sleep.** If the server answers on `localhost` but clients get `Connection reset by peer` (errno 54) or `Empty reply from server`, a stale `ollama serve` is still running the old binary (or wedged after sleep). Restart it so the current binary takes over:
 
 ```bash
 pkill -f "ollama serve"
-OLLAMA_HOST=0.0.0.0:11434 ollama serve   # or: ailocal restart
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
 curl -sS http://<server-ip>:11434/api/version   # verify from the server host
 ```
 
-The same wedge happens after the server Mac **sleeps and wakes**: Ollama keeps running but stops accepting on the real interfaces. `ailocal lan on` already turns on the self-healer for you, so an exposed server recovers on its own. To manage it directly:
-
-```bash
-ailocal autoheal on    # probes reachability every 120s, restarts Ollama if the bind is wedged
-ailocal heal           # run the check once by hand
-```
-
-It runs via a LaunchAgent (launchd fires it right after wake too), so a stale or post-sleep bind is restored within ~2 minutes without you touching anything. No-op unless `ailocal lan on` is set. See [#52](https://github.com/cdamken/chati/issues/52) and [#55](https://github.com/cdamken/chati/issues/55).
-
-### Keeping a server Mac awake
-
-A Mac that sleeps stops answering — even over Tailscale — so a machine you use as a shared Ollama endpoint should stay awake while it serves. Ollama can look "alive" (`/api/tags` responds) yet return **empty generations** when the Mac is in low-power sleep; keeping it awake fixes that.
-
-```bash
-ailocal awake on       # prevent idle sleep (caffeinate) while serving
-ailocal awake status
-ailocal awake off      # restore normal sleep
-```
-
-It uses `caffeinate -s` (no `sudo`), which prevents sleep **only while on AC power** — so a laptop on battery still sleeps normally and won't drain. It's persisted, so `ailocal start` / autostart re-arm it after a reboot; `awake off` stops it. For a headless always-on server you can instead disable sleep at the system level: `sudo pmset -c sleep 0 disablesleep 1` (Mac plugged in).
+See [#52](https://github.com/cdamken/chati/issues/52) and [#55](https://github.com/cdamken/chati/issues/55).
 
 ### Logs
 
-| Service    | Log file                        |
-|------------|---------------------------------|
-| Ollama     | `~/logs/ollama.log`             |
-| OpenWebUI  | `~/logs/webui.log`              |
-| Upgrades   | `~/logs/ailocal_upgrade.log`    |
-| General    | `~/logs/ailocal.log`            |
-| chati   | `~/logs/chati.log`           |
+| Service        | Log file                      |
+|----------------|-------------------------------|
+| Ollama         | `~/logs/ollama.log`           |
+| OpenWebUI      | `~/logs/webui.log`            |
+| SearXNG        | `~/logs/searxng.log`          |
+| WebUI upgrades | `~/logs/webui_upgrade.log`    |
 
 ---
 
@@ -391,10 +328,10 @@ cp .env.example .env        # then edit .env
 
 **Round-robin across several instances.** SearXNG queries upstream engines (Google/Bing/DDG…) that rate-limit **by IP**. Point `SEARXNG_URLS` at more than one instance — each on a different IP — and `/web` spreads calls **randomly** across them, so N instances ≈ **N× the query budget** before you hit limits (a real win for batch jobs making hundreds of calls). On a `429`/`503` an endpoint is **parked for a cooldown** so traffic flows to the healthy ones instead of bouncing off the throttled one; a dead endpoint fails over instantly. Add a server later = one more URL in `SEARXNG_URLS`, no code change.
 
-**Headless: `chati search <query>`.** The same pipeline is available non-interactively — it prints the SearXNG results and exits, no REPL and no LLM call:
+**Headless: `chati --search <query>`.** The same pipeline is available non-interactively — it prints the SearXNG results and exits, no REPL and no LLM call:
 
 ```bash
-chati search "Kimberly-Clark forward P/E ROIC dividend 2026"
+chati --search "Kimberly-Clark forward P/E ROIC dividend 2026"
 ```
 
 This is the programmatic entry point for scripts, pipelines and other machines/agents that need **fresh web facts** without driving the chat UI — e.g. feeding today's numbers into a local model on another host, or a batch screen that pulls current data per item. It reuses `lib_web.sh`'s `web_search`, so it honours the exact same `SEARXNG_URLS`, round-robin and cooldown behaviour. Exit codes: `2` on a missing query, `1` if no backend is configured.
@@ -406,11 +343,10 @@ SEARXNG_URLS="http://localhost:8890, https://cloud.example.com/searx"
 **Optional: a local SearXNG as a second endpoint.** Stand up a personal SearXNG (native, no Docker) on `127.0.0.1:8890` so `/web` round-robins over your home IP *and* your cloud server's IP:
 
 ```bash
-./installer/install_searxng.sh   # git clone + venv (Python 3.12) + granian; one-time
-./ai_local/ailocal start searxng          # managed alongside ollama and webui; shows in ailocal status
+./installer/install_searxng.sh   # git clone + venv (Python 3.12, uv-owned) + granian; one-time
 ```
 
-Then set `SEARXNG_URLS="http://127.0.0.1:8890, https://<your-cloud>/searx"` in `~/chati/.env`. `ailocal start` (no target) also starts it when installed.
+Then set `SEARXNG_URLS="http://127.0.0.1:8890, https://<your-cloud>/searx"` in `~/chati/.env`. Once installed it **starts on demand** when you use `/web` (no manual start); `chati --status` shows it and `chati --stop` stops it.
 
 `lib_chat.sh` loads `~/chati/.env` automatically (it's gitignored — your endpoint and credentials never enter the repo). With `SEARXNG_URL` empty, `/web` preflights, reports "not configured", and stays off. Run your own SearXNG (cloud or local) per [SEARXNG_SETUP.md](installer/SEARXNG_SETUP.md).
 
@@ -440,14 +376,14 @@ near-instant while keeping a big model for the final answer.
 
 ### Apple Silicon acceleration
 
-On Apple Silicon, Ollama uses the GPU **automatically** (Metal, and the MLX runtime bundled with the Homebrew build) — there is nothing to "turn on". The service starters (`ailocal`, `chati`, `setup.sh`) additionally set two performance flags recommended by the Homebrew formula, so large models use less memory and run faster:
+On Apple Silicon, Ollama uses the GPU **automatically** (Metal, and the MLX runtime bundled with the Homebrew build) — there is nothing to "turn on". When chati starts Ollama it additionally sets two performance flags recommended by the Homebrew formula, so large models use less memory and run faster:
 
 | Variable                  | Default   | Purpose                                                              |
 |---------------------------|-----------|---------------------------------------------------------------------|
 | `OLLAMA_FLASH_ATTENTION`  | `1`       | Flash attention — faster, lower memory                              |
 | `OLLAMA_KV_CACHE_TYPE`    | `q8_0`    | Quantize the KV cache to 8-bit — big memory saving on long contexts |
 
-Export different values before starting a service to override them. Keeping Ollama current (`ailocal upgrade ollama`) is what pulls in newer MLX/Metal improvements.
+Export different values before starting a service to override them. Keeping Ollama current (`brew upgrade ollama`) is what pulls in newer MLX/Metal improvements.
 
 ---
 

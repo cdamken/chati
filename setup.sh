@@ -121,7 +121,7 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
   ./setup.sh --force-models  pull the big gemma4 models even on a low-RAM box
   ./setup.sh --update        re-apply over an existing install, respecting its
                              profile (touches OpenWebUI/SearXNG only if already
-                             installed; no heavy reinstalls). Run by `chati upgrade`.
+                             installed; no heavy reinstalls). Run by `chati --upgrade`.
   ./setup.sh --force-webui   force a clean OpenWebUI venv reinstall (repair)
   ./setup.sh --remove-all    UNINSTALL everything this script set up (asks first)
   ./setup.sh --remove-webui   uninstall ONLY OpenWebUI (wipes its data/DB; fixes a
@@ -158,7 +158,7 @@ while [[ $# -gt 0 ]]; do
         --no-pull)   WANT_PULL=0 ;;
         --no-extra-models) WANT_EXTRA_MODELS=0 ;; # skip the big gemma4 pair (still pulls bge-m3)
         --force-models)    FORCE_MODELS=1 ;;      # pull the big models even on a low-RAM box
-        --update)    UPDATE_MODE=1 ;;   # re-apply over an existing install (used by `chati upgrade`)
+        --update)    UPDATE_MODE=1 ;;   # re-apply over an existing install (used by `chati --upgrade`)
         --force-webui) FORCE_WEBUI=1 ;; # force a clean OpenWebUI venv reinstall
         --model)     CHAT_MODEL="${2:?--model needs a model name}"; MODEL_EXPLICIT=1; shift ;;
         --client)    CLIENT_ONLY=1; CLIENT_MODE="full"
@@ -177,7 +177,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---- Re-apply mode (--update) ------------------------------------------------
-# `chati upgrade` runs `setup.sh --update` after pulling new code, so a code
+# `chati --upgrade` runs `setup.sh --update` after pulling new code, so a code
 # update actually gets applied instead of the user having to remember to re-run
 # setup. A re-apply must NOT change the machine's profile: it re-applies config,
 # wiring and permissions, and touches OpenWebUI / SearXNG ONLY if they are
@@ -429,7 +429,7 @@ INSTALL_LOG="$HOME/logs/chati_install_$(date +%Y%m%d_%H%M%S).log"
 mkdir -p "$HOME/logs"
 # Tee stdout+stderr to the log while still showing it on the console.
 exec > >(tee -a "$INSTALL_LOG") 2>&1
-echo "==> chati install log — $(date)"
+echo "==> chati --install log — $(date)"
 echo "    repo=$REPO_ROOT client_only=$CLIENT_ONLY${CLIENT_MODE:+/$CLIENT_MODE} webui=$WANT_WEBUI searxng=$WANT_SEARXNG pull=$WANT_PULL model=$CHAT_MODEL"
 
 echo "🚀 chati setup — repo at: $REPO_ROOT"
@@ -644,7 +644,7 @@ if [[ "$WANT_WEBUI" -eq 1 ]]; then
     step "Installing OpenWebUI (browser UI)"
     # Idempotent by default: install_webui.sh runs `uv pip install --upgrade`,
     # which only downloads a new open-webui if PyPI has one and is a fast no-op
-    # otherwise. This is what makes re-running setup (e.g. every `chati upgrade`)
+    # otherwise. This is what makes re-running setup (e.g. every `chati --upgrade`)
     # cheap. --force wipes and reinstalls the venv from scratch (repair a broken
     # install); opt in with `setup.sh --force-webui`.
     if [[ "$FORCE_WEBUI" -eq 1 ]]; then
@@ -659,7 +659,7 @@ if [[ "$WANT_WEBUI" -eq 1 ]]; then
         ok "OpenWebUI running at http://127.0.0.1:8888"
     else
         warn "OpenWebUI didn't confirm startup in time (it may still be booting)."
-        warn "Check ~/logs/webui.log, or just run: chati webui"
+        warn "Check ~/logs/webui.log, or just run: chati --webui"
     fi
 fi
 
@@ -676,20 +676,20 @@ if [[ "$WANT_WEBUI" -eq 1 ]]; then
     if [[ "$WEBUI_STARTED" -eq 1 ]]; then
         echo "Browser UI (running):    open http://127.0.0.1:8888"
     else
-        echo "Browser UI (start it):   chati webui"
+        echo "Browser UI (start it):   chati --webui"
     fi
 fi
 if [[ "$WANT_SEARXNG" -eq 1 && "$SEARXNG_STARTED" -eq 1 ]]; then
     echo "Web search (/web):       ready — toggle with /web inside chati"
 fi
 cat <<EOF
-Service status:          chati status
-Stop everything:         chati stop
+Service status:          chati --status
+Stop everything:         chati --stop
 Shared models:           gemma4:31b + gemma4:26b + bge-m3 (default; --no-extra-models to skip)
 /web helpers:            llama3.2:3b (route) + llama3.1:8b (queries) — auto-pulled
 Uninstall everything:    ./setup.sh --remove-all
 EOF
-echo "  (Ollama has no auth — 'lan on' exposes it on your LAN/Tailscale only when you ask;"
-echo "   it also enables auto-heal so the bind survives the Mac sleeping. Off by default.)"
+echo "  (Ollama has no auth and stays on localhost. To share it on a server, start it as"
+echo "   OLLAMA_HOST=0.0.0.0:11434 ollama serve on a trusted network or over Tailscale.)"
 echo "Install log:             ${INSTALL_LOG:-$HOME/logs/chati_install_*.log}"
 echo
