@@ -52,7 +52,7 @@ export CHATI_INSTANCE="${CHATI_INSTANCE:-}"
 # behind in the old directory. To the user they looked deleted (#7). It now
 # lives in a stable per-user location instead. Override with CHATI_DATA_HOME.
 # Existing in-checkout data is moved here once, on first run, by
-# migrate_legacy_state (called from the chati/ailocal entrypoints).
+# migrate_legacy_state (called from the chati entrypoint).
 export CHATI_DATA_HOME="${CHATI_DATA_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/chati}"
 mkdir -p "$CHATI_DATA_HOME" 2>/dev/null
 
@@ -119,7 +119,7 @@ export DOCR_CMD="${DOCR_CMD:-$DOCR_DIR/docr}"
 # same var the `ollama` CLI reads, so chat (curl) AND model list/pull/`/model`
 # all hit the same box; else localhost. Normalizes a bare host (adds :11434), a
 # scheme-less host (adds http://), and treats a 0.0.0.0 bind as localhost for
-# the client (that value is a server bind, e.g. from `ailocal lan on`).
+# the client (that value is a server bind set by a remote Ollama host).
 resolve_ollama_api() {
     local api="${1:-}" host="${2:-}"
     if [[ -n "$api" ]]; then printf '%s\n' "$api"; return 0; fi
@@ -447,7 +447,7 @@ log_finetune_record() {
 # future upgrade or re-clone never orphans saved sessions again (#7). It is
 # non-destructive (each item moves only when its destination doesn't already
 # exist, so it can't clobber newer data) and idempotent (a sentinel stops it
-# re-scanning). Call it ONCE from an entrypoint (chati / ailocal) — never at
+# re-scanning). Call it ONCE from the chati entrypoint — never at
 # source time: that would disturb the test sandbox and race the ola/mola
 # subprocesses that re-source this lib on every turn.
 migrate_legacy_state() {

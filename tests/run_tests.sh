@@ -106,7 +106,9 @@ phase "PHASE 1: syntax + smoke"
 
 test_bash_syntax() {
     local f
-    for f in chati lib_chat.sh lib_web.sh ola_chat/ola ola_chat/mola ola_chat/ola_model ai_local/ailocal setup.sh installer/install_searxng.sh tests/run_tests.sh; do
+    for f in chati chati-common.sh lib_chat.sh lib_web.sh ola_chat/ola ola_chat/mola ola_chat/ola_model \
+             libexec/chati-status libexec/chati-stop libexec/chati-webui libexec/chati-install libexec/chati-doctor \
+             setup.sh installer/install_searxng.sh installer/install_webui.sh tests/run_tests.sh; do
         bash -n "$f" || { echo "$f failed bash -n"; return 1; }
     done
 }
@@ -153,52 +155,45 @@ test_ola_model_help() {
 }
 run_test "ola_model --help exits 0" test_ola_model_help
 
-test_ailocal_help_version() {
+test_chati_status_runs() {
+    # Read-only: just pgrep checks, safe anywhere. The three services chati
+    # cares about must all be reported.
     local out
-    out=$(./ai_local/ailocal --help 2>&1) || return 1
-    assert_match "$out" "Unified AI Service Manager" "ailocal --help" || return 1
-    out=$(./ai_local/ailocal --version 2>&1) || return 1
-    assert_match "$out" "ailocal [0-9]+\.[0-9]+" "ailocal --version"
+    out=$(./chati status 2>&1) || return 1
+    assert_match "$out" "Ollama" "status reports Ollama" \
+        && assert_match "$out" "OpenWebUI" "status reports OpenWebUI" \
+        && assert_match "$out" "SearXNG" "status reports SearXNG"
 }
-run_test "ailocal --help and --version exit 0" test_ailocal_help_version
+run_test "chati status reports the three services" test_chati_status_runs
 
-test_ailocal_status_runs() {
-    # Read-only: just pgrep checks, safe anywhere.
-    local out
-    out=$(./ai_local/ailocal status 2>&1) || return 1
-    assert_match "$out" "Ollama:" "status output shape" \
-        && assert_match "$out" "OpenWebUI:" "status output shape"
+test_service_commands_present() {
+    # The three user-facing service commands exist and are executable.
+    local s
+    for s in status stop webui install; do
+        [[ -x "$PROJECT_DIR/libexec/chati-$s" ]] \
+            || { echo "libexec/chati-$s missing or not executable" >&2; return 1; }
+    done
+    # No manual start/restart for ollama/searxng by design — those stubs are gone.
+    for s in ollama searxng restart start; do
+        [[ -e "$PROJECT_DIR/libexec/chati-$s" ]] \
+            && { echo "libexec/chati-$s should not exist (no manual start/restart)" >&2; return 1; }
+    done
+    return 0
 }
-run_test "ailocal status reports both services" test_ailocal_status_runs
+run_test "the three service commands exist, no manual start/restart" test_service_commands_present
 
-test_ailocal_verb_target_standard() {
-    # The help must document the VERB [TARGET] standard and the
-    # single-slot backup/restore pair; bad targets must be rejected
-    # with a clear error (not fall through silently).
-    local out
-    out=$(./ai_local/ailocal --help 2>&1) || return 1
-    assert_match "$out" "start +\[target\]" "start verb documented" || return 1
-    assert_match "$out" "restart \[target\]" "restart verb documented" || return 1
-    assert_match "$out" "backup" "backup documented" || return 1
-    assert_match "$out" "restore \[--yes\]" "restore documented" || return 1
-    if ./ai_local/ailocal start nonsense >/dev/null 2>&1; then
-        echo "expected 'start nonsense' to fail" >&2
-        return 1
-    fi
+test_install_webui_guards() {
+    # The OpenWebUI installer must keep the hard-won safety: a backup BEFORE the
+    # upgrade, uv OWNING the Python (survives brew autoremove), and a restore
+    # that integrity-checks the snapshot before overwriting live data.
+    local f="$PROJECT_DIR/installer/install_webui.sh"
+    [[ -x "$f" ]] || { echo "install_webui.sh missing" >&2; return 1; }
+    grep -q 'create_backup' "$f"            || { echo "no backup-before-upgrade" >&2; return 1; }
+    grep -q 'uv python install' "$f"        || { echo "uv must own the Python (uv python install)" >&2; return 1; }
+    grep -q 'integrity_check' "$f"          || { echo "restore must integrity-check the backup" >&2; return 1; }
+    grep -q 'DATA_DIR\|OPENWEBUI_DATA_DIR' "$f" || { echo "external DATA_DIR fix lost" >&2; return 1; }
 }
-run_test "ailocal follows the VERB TARGET standard" test_ailocal_verb_target_standard
-
-test_ailocal_searxng_documented() {
-    # ailocal must know the searxng target and offer the install path.
-    local out; out=$(./ai_local/ailocal --help 2>&1) || return 1
-    assert_match "$out" "searxng" "searxng target in help" \
-        && assert_match "$out" "install_searxng" "install script referenced"
-    # Unknown target still errors clearly (dispatch didn't get sloppy).
-    if ./ai_local/ailocal start bogus >/dev/null 2>&1; then
-        echo "start bogus should fail" >&2; return 1
-    fi
-}
-run_test "ailocal exposes the searxng target" test_ailocal_searxng_documented
+run_test "install_webui.sh keeps backup + uv-owned Python + safe restore" test_install_webui_guards
 
 test_setup_searxng_case_not_shadowed() {
     # Regression (#88): --searxng appeared twice in the arg case; the first match
@@ -229,7 +224,7 @@ test_update_applies_setup() {
     # The webui step is idempotent by default: the --force is gated behind
     # FORCE_WEBUI, and a plain (no --force) invocation exists as the default path.
     grep -q 'FORCE_WEBUI" -eq 1' "$PROJECT_DIR/setup.sh" \
-        && grep -qE 'ailocal" upgrade webui$' "$PROJECT_DIR/setup.sh" \
+        && grep -qE 'install_webui\.sh"$' "$PROJECT_DIR/setup.sh" \
         || { echo "setup.sh webui step should be idempotent, --force gated by FORCE_WEBUI" >&2; return 1; }
 }
 run_test "chati --update applies setup, idempotently (#70 follow-up)" test_update_applies_setup
@@ -238,7 +233,8 @@ test_ollama_proc_pattern() {
     # The process-match pattern must catch ollama at a path/word boundary
     # but NOT a lookalike like "myollama serve". Eval the real value from
     # the script so the test tracks it.
-    eval "$(grep '^OLLAMA_PROC=' "$PROJECT_DIR/ai_local/ailocal")"
+    eval "$(grep '^CHATI_OLLAMA_PROC=' "$PROJECT_DIR/chati-common.sh")"
+    OLLAMA_PROC="$CHATI_OLLAMA_PROC"
     echo "/opt/homebrew/bin/ollama serve" | grep -qE "$OLLAMA_PROC" \
         || { echo "pattern should match the real path form" >&2; return 1; }
     echo "ollama serve" | grep -qE "$OLLAMA_PROC" \
@@ -247,7 +243,7 @@ test_ollama_proc_pattern() {
         echo "pattern wrongly matches 'myollama serve'" >&2; return 1
     fi
 }
-run_test "ailocal OLLAMA_PROC matches ollama, not lookalikes" test_ollama_proc_pattern
+run_test "CHATI_OLLAMA_PROC matches ollama, not lookalikes" test_ollama_proc_pattern
 
 test_ola_dash_m_no_hang() {
     # `ola -m` with no value used to infinite-loop (shift 2 on 1 arg never
@@ -1102,8 +1098,8 @@ test_version_gt() {
 }
 run_test "version_gt compares versions numerically (self-update)" test_version_gt
 
-# --- OpenWebUI login-less persistence (ailocal resolve_webui_auth) ---
-eval "$(awk '/^resolve_webui_auth\(\) \{/,/^}$/' "$PROJECT_DIR/ai_local/ailocal")"
+# --- OpenWebUI login-less persistence (libexec/chati-webui resolve_webui_auth) ---
+eval "$(awk '/^resolve_webui_auth\(\) \{/,/^}$/' "$PROJECT_DIR/libexec/chati-webui")"
 test_webui_auth_persists_loginless() {
     local dir="$SANDBOX/webui_auth"; rm -rf "$dir"; mkdir -p "$dir"
     local db="$dir/webui.db" marker="$dir/.loginless"
@@ -1563,25 +1559,28 @@ test_doctor_line_format() {
 }
 run_test "chati-doctor _doctor_line formats status rows" test_doctor_line_format
 
-test_service_cmd_guards() {
-    # Validate the non-exec branches (a valid action would exec ailocal and
-    # actually start/stop a service, so we only test the guards here).
-    local save="$CHATI_DIR"
-    local bad; ( CHATI_DIR="$PWD"; chati_service_cmd webui frobnicate ) >/dev/null 2>&1; bad=$?
-    # Extra args after a valid action are rejected, not dropped (needs ailocal
-    # present so we exercise the extra-arg guard, not the missing-dep branch).
-    local e; e=$(mktemp -d); mkdir -p "$e/ai_local"
-    printf '#!/bin/bash\nexit 0\n' > "$e/ai_local/ailocal"; chmod +x "$e/ai_local/ailocal"
-    local extra; ( CHATI_DIR="$e"; chati_service_cmd webui start --port 9999 ) >/dev/null 2>&1; extra=$?
-    rm -rf "$e"
-    local d; d=$(mktemp -d)   # no ailocal inside → missing-dep
-    local miss; ( CHATI_DIR="$d"; chati_service_cmd webui start ) >/dev/null 2>&1; miss=$?
-    rm -rf "$d"; CHATI_DIR="$save"
-    assert_eq "$bad" "2" "invalid action -> exit 2 (usage)" \
-        && assert_eq "$extra" "2" "extra args after action -> exit 2 (usage)" \
-        && assert_eq "$miss" "3" "missing ailocal -> exit 3 (dependency)"
+test_svc_running_and_stop() {
+    # Exercise chati_svc_running / chati_svc_stop against a THROWAWAY process of
+    # our own (a sleep with a unique duration as the marker) — never a real
+    # service, so the test can't stop Ollama/OpenWebUI/SearXNG.
+    local marker=$(( 30000 + (RANDOM % 9000) ))
+    sleep "$marker" &
+    local pid=$!
+    # Give the process a moment to be visible to pgrep.
+    local t; for t in 1 2 3 4 5; do chati_svc_running "sleep $marker" && break; sleep 0.1; done
+    if ! chati_svc_running "sleep $marker"; then
+        kill "$pid" 2>/dev/null; echo "tagged sleep not seen as running" >&2; return 1
+    fi
+    local out; out=$(chati_svc_stop "sleep $marker" "TestSvc" 5)
+    if chati_svc_running "sleep $marker"; then
+        kill -9 "$pid" 2>/dev/null; echo "svc_stop left the process alive" >&2; return 1
+    fi
+    assert_match "$out" "TestSvc stopped" "svc_stop reports the stop" || return 1
+    # And a no-op path: nothing matching the pattern.
+    out=$(chati_svc_stop "sleep 999888777 nonexistent" "Ghost")
+    assert_eq "$out" "Ghost was not running" "svc_stop is a no-op when absent"
 }
-run_test "chati_service_cmd guards invalid action and missing ailocal" test_service_cmd_guards
+run_test "chati_svc_running/chati_svc_stop manage a service by proc pattern" test_svc_running_and_stop
 
 # --- extract_exec_cmd ---
 test_exec_simple() {
@@ -1886,9 +1885,11 @@ test_bash_only_no_foreign_runtimes() {
     # The shipped scripts only. The test harness itself is excluded: it names
     # these runtimes on purpose (to enforce this very rule), so scanning it would
     # flag its own strings.
-    local scripts=(chati lib_chat.sh lib_web.sh setup.sh ai_local/ailocal docr/docr
+    local scripts=(chati chati-common.sh lib_chat.sh lib_web.sh setup.sh docr/docr
+                   libexec/chati-status libexec/chati-stop libexec/chati-webui
+                   libexec/chati-install libexec/chati-doctor
                    ola_chat/ola ola_chat/mola ola_chat/ola_model
-                   installer/install_searxng.sh)
+                   installer/install_searxng.sh installer/install_webui.sh)
     local banned='python3|python|perl|ruby|nodejs|node|php|groovy'
     local f offenders=""
     for f in "${scripts[@]}"; do
@@ -1991,13 +1992,13 @@ _lint_ceiling() {
         chati)            echo 2 ;;
         lib_chat.sh)      echo 2 ;;
         setup.sh)         echo 2 ;;
-        ai_local/ailocal) echo 1 ;;
         *)                echo 0 ;;
     esac
 }
 
 test_lint_shellcheck() {
-    local files=(chati lib_chat.sh lib_web.sh setup.sh ai_local/ailocal docr/docr)
+    local files=(chati chati-common.sh lib_chat.sh lib_web.sh setup.sh docr/docr
+                 installer/install_webui.sh)
     # Include dispatcher subcommands once the chati-<sub> split lands (#87).
     local x
     for x in "$PROJECT_DIR"/libexec/chati-*; do

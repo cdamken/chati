@@ -30,7 +30,7 @@ if [[ -n "$_subpath" ]]; then
 fi
 unset _subpath
 
-CHATI_VERSION="1.35.0"
+CHATI_VERSION="1.36.0"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 
@@ -131,7 +131,7 @@ check_for_update_quiet() {
     printf '%s' "$now" > "$f" 2>/dev/null || true
     local latest; latest=$(chati_latest_version) || return 0
     version_gt "$CHATI_VERSION" "$latest" \
-        && echo "🆕 chati v$latest is available (you have $CHATI_VERSION). Update:  chati --update"
+        && echo "🆕 chati v$latest is available (you have $CHATI_VERSION). Update:  chati upgrade"
     return 0
 }
 
@@ -139,33 +139,36 @@ check_for_update_quiet() {
 # headless `chati search` subcommand work without entering the REPL.
 case "${1:-}" in
     -h|--help)
-        echo "Usage: chati [-h|--help] [-v|--version] [--check-update] [--update] [search <query...>]"
-        echo "Interactive Ollama chat. Type /h once inside for command list."
+        echo "Usage: chati [command]"
+        echo "With no command, starts the interactive Ollama chat (type /h inside for the command list)."
         echo ""
-        echo "  --check-update      Check GitHub for a newer release (prints, no changes)."
-        echo "  --update            Update this checkout to the latest release (git pull)."
+        echo "Commands (one front door, no dashes):"
+        echo "  install [flags]     Install chati and its services (flags pass to the installer)."
+        echo "  upgrade             Update this checkout to the latest release (git pull + re-apply)."
+        echo "  webui               Start the OpenWebUI stack (Ollama + OpenWebUI)."
+        echo "  stop                Stop the local services (OpenWebUI, SearXNG, Ollama)."
+        echo "  status              Show which local services are running."
+        echo "  doctor              Report the health of this install."
+        echo "  search <query...>   Headless web search via the SearXNG backend (no REPL)."
         echo ""
-        echo "  search <query...>   Headless web search via the SearXNG backend:"
-        echo "                      prints results and exits (no REPL). For scripts,"
-        echo "                      pipelines and other machines/agents. Needs SEARXNG_URLS"
-        echo "                      configured in .env (same backend as the /web toggle)."
+        echo "  check-update        Check GitHub for a newer release (prints, no changes)."
+        echo "  -v, --version       Print the version."
         exit 0 ;;
     -v|--version)
         show_version; exit 0 ;;
-    --update|--upgrade)
+    upgrade)
+        # One name, no dash (matches `chati install`). "upgrade" is reserved so
+        # the dispatcher never routes it to a libexec script.
         chati_self_update; exit $? ;;
-    --doctor)
-        # Alias for the `chati doctor` subcommand.
-        exec "$CHATI_DIR/libexec/chati-doctor" "${@:2}" ;;
-    --check-update|--check)
+    check-update)
         _lv=$(chati_latest_version) || { echo "chati: couldn't reach GitHub to check." >&2; exit 1; }
         if version_gt "$CHATI_VERSION" "$_lv"; then
-            echo "🆕 chati v$_lv is available (you have $CHATI_VERSION). Update:  chati --update"
+            echo "🆕 chati v$_lv is available (you have $CHATI_VERSION). Update:  chati upgrade"
         else
             echo "✅ chati is up to date ($CHATI_VERSION; latest release v$_lv)."
         fi
         exit 0 ;;
-    search|--search)
+    search)
         # Headless one-shot web search. Reuses lib_web.sh's web_search (sourced
         # via lib_chat.sh above), so it hits the exact same SearXNG endpoints and
         # formatting as the interactive /web pipeline — no REPL, no LLM call.
@@ -1407,7 +1410,7 @@ ensure_ollama_running() {
     fi
     echo "🚀 Starting 'ollama serve' (logs: ~/logs/ollama.log)..."
     mkdir -p "$HOME/logs"
-    # Apple Silicon perf tuning (see ailocal): flash attention + q8 KV cache.
+    # Apple Silicon perf tuning (Homebrew ollama's recommended flags): flash attention + q8 KV cache.
     export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
     export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
     nohup ollama serve </dev/null >"$HOME/logs/ollama.log" 2>&1 &
@@ -1835,7 +1838,7 @@ while true; do
                                     echo "   Its models differ — run /model to pick one available here."
                                 else
                                     echo "💾 Saved default Ollama → $OLLAMA_API (in .env), but can't reach it right now."
-                                    echo "   It'll be used once it's up (wake the machine, or 'ailocal awake on' there)."
+                                    echo "   It'll be used once it's up (wake or start that machine first)."
                                 fi
                             else
                                 if [[ -z "$h_target" ]]; then

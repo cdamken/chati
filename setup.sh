@@ -121,7 +121,7 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
   ./setup.sh --force-models  pull the big gemma4 models even on a low-RAM box
   ./setup.sh --update        re-apply over an existing install, respecting its
                              profile (touches OpenWebUI/SearXNG only if already
-                             installed; no heavy reinstalls). Run by `chati --update`.
+                             installed; no heavy reinstalls). Run by `chati upgrade`.
   ./setup.sh --force-webui   force a clean OpenWebUI venv reinstall (repair)
   ./setup.sh --remove-all    UNINSTALL everything this script set up (asks first)
   ./setup.sh --remove-webui   uninstall ONLY OpenWebUI (wipes its data/DB; fixes a
@@ -158,7 +158,7 @@ while [[ $# -gt 0 ]]; do
         --no-pull)   WANT_PULL=0 ;;
         --no-extra-models) WANT_EXTRA_MODELS=0 ;; # skip the big gemma4 pair (still pulls bge-m3)
         --force-models)    FORCE_MODELS=1 ;;      # pull the big models even on a low-RAM box
-        --update)    UPDATE_MODE=1 ;;   # re-apply over an existing install (used by `chati --update`)
+        --update)    UPDATE_MODE=1 ;;   # re-apply over an existing install (used by `chati upgrade`)
         --force-webui) FORCE_WEBUI=1 ;; # force a clean OpenWebUI venv reinstall
         --model)     CHAT_MODEL="${2:?--model needs a model name}"; MODEL_EXPLICIT=1; shift ;;
         --client)    CLIENT_ONLY=1; CLIENT_MODE="full"
@@ -177,7 +177,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---- Re-apply mode (--update) ------------------------------------------------
-# `chati --update` runs `setup.sh --update` after pulling new code, so a code
+# `chati upgrade` runs `setup.sh --update` after pulling new code, so a code
 # update actually gets applied instead of the user having to remember to re-run
 # setup. A re-apply must NOT change the machine's profile: it re-applies config,
 # wiring and permissions, and touches OpenWebUI / SearXNG ONLY if they are
@@ -206,8 +206,8 @@ remove_all() {
     echo "     • OpenWebUI:        ~/openwebui"
     echo "     • Local SearXNG:    ~/searxng"
     echo "     • Logs:             ~/logs"
-    echo "     • PATH links:       ${brew_bin:-<brew bin>}/{chati,ailocal}"
-    echo "     • Autostart agent:  ~/Library/LaunchAgents/com.chati.ailocal.plist"
+    echo "     • PATH link:        ${brew_bin:-<brew bin>}/chati (and any old ailocal link)"
+    echo "     • Autostart agent:  ~/Library/LaunchAgents/com.chati.ailocal.plist (older installs)"
     echo "     • Repo state:       .env, .active_ollama_model.txt, .web_cache,"
     echo "                         conversation_histories/, ola_chat/instances/"
     echo "     • User data home:   ${CHATI_DATA_HOME:-$HOME/.local/share/chati}"
@@ -245,11 +245,11 @@ remove_all() {
     fi
 
     step "Stopping services"
-    [[ -x "$REPO_ROOT/ai_local/ailocal" ]] && "$REPO_ROOT/ai_local/ailocal" stop >/dev/null 2>&1 || true
+    [[ -x "$REPO_ROOT/libexec/chati-stop" ]] && "$REPO_ROOT/libexec/chati-stop" >/dev/null 2>&1 || true
     pkill -f 'granian.*searx\.webapp' >/dev/null 2>&1 || true
     ok "Services stopped"
 
-    step "Removing the 'chati' and 'ailocal' PATH links"
+    step "Removing the 'chati' PATH link (and any old 'ailocal' leftover)"
     if [[ -n "$brew_bin" ]]; then
         [[ -L "$brew_bin/chati" ]] && rm -f "$brew_bin/chati"
         [[ -L "$brew_bin/ailocal" ]] && rm -f "$brew_bin/ailocal"
@@ -298,7 +298,6 @@ remove_webui() {
         [[ "$reply" == [yY] || "$reply" == [yY][eE][sS] ]] || die "Aborted — nothing removed."
     fi
     step "Stopping OpenWebUI"
-    [[ -x "$REPO_ROOT/ai_local/ailocal" ]] && "$REPO_ROOT/ai_local/ailocal" stop webui >/dev/null 2>&1 || true
     pkill -f 'open-webui serve' >/dev/null 2>&1 || true
     step "Removing OpenWebUI app + data"
     rm -rf "$HOME/openwebui"
@@ -318,7 +317,6 @@ remove_searxng() {
         [[ "$reply" == [yY] || "$reply" == [yY][eE][sS] ]] || die "Aborted — nothing removed."
     fi
     step "Stopping SearXNG"
-    [[ -x "$REPO_ROOT/ai_local/ailocal" ]] && "$REPO_ROOT/ai_local/ailocal" stop searxng >/dev/null 2>&1 || true
     pkill -f 'granian.*searx\.webapp' >/dev/null 2>&1 || true
     step "Removing SearXNG"
     rm -rf "$HOME/searxng"
@@ -361,12 +359,12 @@ client_install() {
     fi
 
     mkdir -p "$HOME/logs" "$REPO_ROOT/conversation_histories"
-    chmod +x "$REPO_ROOT/chati" "$REPO_ROOT/ai_local/ailocal" \
+    chmod +x "$REPO_ROOT/chati" \
              "$REPO_ROOT/ola_chat/ola" "$REPO_ROOT/ola_chat/mola" \
              "$REPO_ROOT/ola_chat/ola_model" "$REPO_ROOT/docr/docr" 2>/dev/null || true
+    chmod +x "$REPO_ROOT"/libexec/chati-* 2>/dev/null || true
     local brew_bin; brew_bin="$(brew --prefix)/bin"
     ln -sf "$REPO_ROOT/chati"            "$brew_bin/chati"   2>/dev/null
-    ln -sf "$REPO_ROOT/ai_local/ailocal" "$brew_bin/ailocal" 2>/dev/null
     ok "Linked 'chati' onto your PATH"
 
     # FULL: build the Apple Vision OCR helper (fast, reads HEIC; falls back to
@@ -475,24 +473,25 @@ ok "logs/ and conversation_histories/ ready"
 # Only the real entry points — a stale name here would abort under set -e.
 step "Setting executable permissions"
 chmod +x "$REPO_ROOT/chati" \
-         "$REPO_ROOT/ai_local/ailocal" \
          "$REPO_ROOT/docr/docr" \
          "$REPO_ROOT/ola_chat/ola" "$REPO_ROOT/ola_chat/mola" "$REPO_ROOT/ola_chat/ola_model" \
          "$REPO_ROOT/tests/run_tests.sh" \
          "$REPO_ROOT/installer/install_searxng.sh" 2>/dev/null || true
+chmod +x "$REPO_ROOT"/libexec/chati-* 2>/dev/null || true
 ok "Scripts are executable"
 
-# ---- 5b. Make `chati` and `ailocal` runnable from anywhere ------------------
-# Symlink both into Homebrew's bin (already on PATH and user-writable). chati
-# resolves symlinks to locate its repo; ailocal uses $HOME-based paths and
-# doesn't care where it's invoked from — so both work from any directory.
-step "Linking 'chati' and 'ailocal' onto your PATH"
+# ---- 5b. Make `chati` runnable from anywhere -------------------------------
+# One command: symlink chati into Homebrew's bin (already on PATH and
+# user-writable). chati resolves symlinks to locate its repo, so it works from
+# any directory. Everything else is a `chati <subcommand>`.
+step "Linking 'chati' onto your PATH"
 BREW_BIN="$(brew --prefix)/bin"
-if ln -sf "$REPO_ROOT/chati" "$BREW_BIN/chati" 2>/dev/null \
-   && ln -sf "$REPO_ROOT/ai_local/ailocal" "$BREW_BIN/ailocal" 2>/dev/null; then
-    ok "You can now run 'chati' and 'ailocal' from anywhere"
+# Clean up the old ailocal symlink from pre-1.36 installs (ailocal is gone).
+[[ -L "$BREW_BIN/ailocal" ]] && rm -f "$BREW_BIN/ailocal" 2>/dev/null
+if ln -sf "$REPO_ROOT/chati" "$BREW_BIN/chati" 2>/dev/null; then
+    ok "You can now run 'chati' from anywhere"
 else
-    warn "Couldn't link into $BREW_BIN — run them as ./chati and ./ai_local/ailocal, or add the repo to your PATH."
+    warn "Couldn't link into $BREW_BIN — run it as ./chati, or add the repo to your PATH."
 fi
 
 # ---- 5c. Apple Vision OCR helper (macOS) ------------------------------------
@@ -624,12 +623,12 @@ if [[ "$WANT_SEARXNG" -eq 1 ]]; then
             ok "Wired /web to $SEARXNG_LOCAL_URL in .env"
         fi
         step "Starting SearXNG"
-        if "$REPO_ROOT/ai_local/ailocal" start searxng >/dev/null 2>&1 \
+        if ( CHATI_DIR="$REPO_ROOT"; source "$REPO_ROOT/chati-common.sh"; chati_start_searxng ) >/dev/null 2>&1 \
            && curl -fsS --max-time 5 "$SEARXNG_LOCAL_URL/healthz" >/dev/null 2>&1; then
             SEARXNG_STARTED=1
             ok "SearXNG running at $SEARXNG_LOCAL_URL — toggle it in chati with /web"
         else
-            warn "SearXNG didn't confirm startup — check ~/logs/searxng.log, then: ./ai_local/ailocal start searxng"
+            warn "SearXNG didn't confirm startup — check ~/logs/searxng.log; it also comes up on demand when you use /web."
         fi
     else
         warn "SearXNG install failed (see output above) — /web stays off. Chat and OpenWebUI are unaffected."
@@ -643,24 +642,24 @@ fi
 WEBUI_STARTED=0
 if [[ "$WANT_WEBUI" -eq 1 ]]; then
     step "Installing OpenWebUI (browser UI)"
-    # Idempotent by default: `ailocal upgrade webui` (no --force) runs
-    # `uv pip install --upgrade`, which only downloads a new open-webui if PyPI
-    # has one and is a fast no-op otherwise. This is what makes re-running setup
-    # (e.g. every `chati --update`) cheap. --force wipes and reinstalls the venv
-    # from scratch (repair a broken install); opt in with `setup.sh --force-webui`.
+    # Idempotent by default: install_webui.sh runs `uv pip install --upgrade`,
+    # which only downloads a new open-webui if PyPI has one and is a fast no-op
+    # otherwise. This is what makes re-running setup (e.g. every `chati upgrade`)
+    # cheap. --force wipes and reinstalls the venv from scratch (repair a broken
+    # install); opt in with `setup.sh --force-webui`.
     if [[ "$FORCE_WEBUI" -eq 1 ]]; then
-        "$REPO_ROOT/ai_local/ailocal" upgrade webui --force
+        "$REPO_ROOT/installer/install_webui.sh" --force
     else
-        "$REPO_ROOT/ai_local/ailocal" upgrade webui
+        "$REPO_ROOT/installer/install_webui.sh"
     fi
     ok "OpenWebUI installed"
     step "Starting OpenWebUI (first boot can take a minute)"
-    if "$REPO_ROOT/ai_local/ailocal" start webui; then
+    if "$REPO_ROOT/libexec/chati-webui"; then
         WEBUI_STARTED=1
         ok "OpenWebUI running at http://127.0.0.1:8888"
     else
         warn "OpenWebUI didn't confirm startup in time (it may still be booting)."
-        warn "Check ~/logs/webui.log, or just run: ./ai_local/ailocal start webui"
+        warn "Check ~/logs/webui.log, or just run: chati webui"
     fi
 fi
 
@@ -677,15 +676,15 @@ if [[ "$WANT_WEBUI" -eq 1 ]]; then
     if [[ "$WEBUI_STARTED" -eq 1 ]]; then
         echo "Browser UI (running):    open http://127.0.0.1:8888"
     else
-        echo "Browser UI (start it):   ailocal start webui"
+        echo "Browser UI (start it):   chati webui"
     fi
 fi
 if [[ "$WANT_SEARXNG" -eq 1 && "$SEARXNG_STARTED" -eq 1 ]]; then
     echo "Web search (/web):       ready — toggle with /web inside chati"
 fi
 cat <<EOF
-Service status:          ailocal status
-Serve to other machines: ailocal lan on
+Service status:          chati status
+Stop everything:         chati stop
 Shared models:           gemma4:31b + gemma4:26b + bge-m3 (default; --no-extra-models to skip)
 /web helpers:            llama3.2:3b (route) + llama3.1:8b (queries) — auto-pulled
 Uninstall everything:    ./setup.sh --remove-all

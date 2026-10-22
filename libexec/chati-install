@@ -1,0 +1,27 @@
+#!/bin/bash
+# summary: instala (o reinstala) chati y sus servicios locales
+#==============================================================================
+# chati install — the single entry point for setting chati up.
+#
+# One front door: `chati install` on a fresh clone does the initial install,
+# and `chati --upgrade` later re-applies it over a pull. Works before chati is
+# on your PATH (run ./chati install from the clone), because the dispatcher
+# resolves this subcommand before chati loads its chat libraries.
+#
+# All the real install work (brew packages, OCR stack, OpenWebUI, SearXNG, PATH
+# links) lives in setup.sh, which this hands every argument to unchanged — so
+# every setup.sh flag still works: `chati install --client HOST`,
+# `chati install --minimal`, `chati install --force-webui`, etc.
+#==============================================================================
+set -o pipefail
+
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+    _dir="$(cd -P "$(dirname "$_src")" && pwd)"; _src="$(readlink "$_src")"
+    [[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+CHATI_DIR="$(cd -P "$(dirname "$_src")/.." && pwd)"
+unset _src _dir
+
+[[ -x "$CHATI_DIR/setup.sh" ]] || { echo "chati install: setup.sh not found in $CHATI_DIR" >&2; exit 1; }
+exec "$CHATI_DIR/setup.sh" "$@"
