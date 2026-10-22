@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.36.1] - 2026-10-22
+
+### Fixed
+- **SearXNG install now has uv own the Python too.** `install_searxng.sh` runs
+  `uv python install 3.12` before building the venv, so a later `brew autoremove`
+  can't delete the interpreter out from under it. This is the same robustness fix
+  1.36.0 added for OpenWebUI, and it is the breakage that left granian pointing at
+  a missing `python@3.12`. Re-run the installer to repair an already-broken venv.
+
 ## [1.36.0] - 2026-10-22
 
 One command, three services, no `ailocal`. chati now manages the whole local

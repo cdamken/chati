@@ -30,7 +30,7 @@ if [[ -n "$_subpath" ]]; then
 fi
 unset _subpath
 
-CHATI_VERSION="1.36.0"
+CHATI_VERSION="1.36.1"
 
 show_version() { echo "chati $CHATI_VERSION"; }
 

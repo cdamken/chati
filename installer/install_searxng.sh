@@ -37,6 +37,12 @@ else
 fi
 
 # 2. venv on Python 3.12 (3.14 breaks SearXNG's deps).
+# Have uv OWN the Python first: a managed standalone CPython that `brew
+# autoremove` can't delete out from under the venv. Without this, the venv
+# linked brew's python@3.12 and a later autoremove left a dangling interpreter
+# (the "No such file or directory" granian breakage). Fast no-op once present.
+uv python install 3.12 || { echo "❌ Failed to install uv-managed Python 3.12"; exit 1; }
+
 # Reuse an existing venv instead of failing: a re-run/upgrade shouldn't blow
 # away a working environment (and `uv venv` errors when it already exists and
 # the user declines to replace it). Deps below are (re)installed either way.
