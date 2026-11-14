@@ -1004,6 +1004,10 @@ eval "$(awk '/^settings_write\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^settings_read\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^load_active_settings\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^reload_settings_announce\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(grep '^CHATI_SAFETY_KEYS=' "$PROJECT_DIR/chati")"
+eval "$(grep '^chati_is_safety_key()' "$PROJECT_DIR/chati")"
+eval "$(awk '/^settings_write_defaults\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^carry_prefs_snapshot\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 
 # Factory baseline used by the #60 tests below.
 _write_builtin_baseline() {
@@ -1093,6 +1097,47 @@ test_switch_announces_shell_drop() {
         && assert_match "$out" "/back" "points at /back to return to the armed session"
 }
 run_test "session change announces Shell going OFF (#60)" test_switch_announces_shell_drop
+
+test_new_session_carries_prefs_not_safety() {
+    # A /new must KEEP the preferences you had (voice, language, web, thinking,
+    # colors) instead of wiping them, while the safety toggles (shell/auto-accept)
+    # still reset. carry_prefs_snapshot records only the preference keys.
+    VOICE_MODE=ON FORCE_LANG=es WEB_MODE=ON THINK_MODE=ON \
+        AGENT_MODE=ON AGENT_AUTOACCEPT=ON USER_COLOR_NAME=cyan
+    carry_prefs_snapshot
+    printf '%s\n' "${CHATI_CARRY_PREFS[@]}" | grep -qx "VOICE_MODE=ON" \
+        || { echo "voice not in carried prefs" >&2; return 1; }
+    printf '%s\n' "${CHATI_CARRY_PREFS[@]}" | grep -qx "FORCE_LANG=es" \
+        || { echo "lang not in carried prefs" >&2; return 1; }
+    if printf '%s\n' "${CHATI_CARRY_PREFS[@]}" | grep -qE '^AGENT_(MODE|AUTOACCEPT)='; then
+        echo "safety toggle leaked into carried prefs" >&2; return 1
+    fi
+    # New session landed on the factory baseline (everything off); applying the
+    # snapshot brings prefs back but leaves safety off.
+    VOICE_MODE=OFF FORCE_LANG=auto WEB_MODE=OFF THINK_MODE=OFF \
+        AGENT_MODE=OFF AGENT_AUTOACCEPT=OFF
+    local kv k v
+    for kv in "${CHATI_CARRY_PREFS[@]}"; do k="${kv%%=*}"; v="${kv#*=}"; printf -v "$k" '%s' "$v"; done
+    assert_eq "$VOICE_MODE" "ON" "voice carried into new session" \
+        && assert_eq "$FORCE_LANG" "es" "lang carried into new session" \
+        && assert_eq "$WEB_MODE" "ON" "web carried into new session" \
+        && assert_eq "$AGENT_MODE" "OFF" "shell did NOT carry (safety)" \
+        && assert_eq "$AGENT_AUTOACCEPT" "OFF" "auto-accept did NOT carry (safety)"
+}
+run_test "new session carries preferences but not safety toggles" test_new_session_carries_prefs_not_safety
+
+test_defaults_save_excludes_safety() {
+    # /defaults save must never bake shell/auto-accept into the global defaults,
+    # or a brand-new session could silently start armed (#60).
+    AGENT_MODE=ON AGENT_AUTOACCEPT=ON VOICE_MODE=ON FORCE_LANG=es
+    settings_write_defaults "$SANDBOX/def_excl"
+    grep -qx "VOICE_MODE=ON" "$SANDBOX/def_excl" \
+        || { echo "preference missing from defaults" >&2; return 1; }
+    if grep -qE '^AGENT_(MODE|AUTOACCEPT)=' "$SANDBOX/def_excl"; then
+        echo "safety toggle written into global defaults" >&2; return 1
+    fi
+}
+run_test "/defaults save excludes shell/auto-accept" test_defaults_save_excludes_safety
 
 test_lang_codes_map_to_full_names() {
     # A bare code in "Respond ONLY in ar" is ambiguous — small models sometimes

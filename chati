@@ -289,6 +289,13 @@ update_say_rate() {
 CHATI_SETTINGS_KEYS=(FORCE_LANG WEB_MODE THINK_MODE AGENT_MODE AGENT_AUTOACCEPT \
                      VOICE_MODE DEFAULT_VOICE SAY_SPEED SAY_COLORS \
                      USER_COLOR_NAME AI_COLOR_NAME)
+# Safety toggles: shell (AGENT_MODE) and auto-accept (AGENT_AUTOACCEPT) must be
+# armed EXPLICITLY in each session and never follow you into a new one or hide in
+# the global defaults (#60). Every other key is a preference that DOES follow you
+# across /new (voice, language, colors, web, thinking) — losing those on a new
+# conversation was the bug. Space-matched, bash-3.2 safe.
+CHATI_SAFETY_KEYS=(AGENT_MODE AGENT_AUTOACCEPT)
+chati_is_safety_key() { case " ${CHATI_SAFETY_KEYS[*]} " in *" $1 "*) return 0 ;; esac; return 1; }
 DEFAULTS_SETTINGS_FILE="${DEFAULTS_SETTINGS_FILE:-$CHATI_DATA_HOME/defaults_settings}"
 # Factory snapshot of the built-in toggle values (as initialized above), captured
 # ONCE before anything loads over them. load_active_settings resets to these
@@ -302,6 +309,18 @@ settings_write() {
     mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
     : > "$f" 2>/dev/null || return 0
     for k in "${CHATI_SETTINGS_KEYS[@]}"; do printf '%s=%s\n' "$k" "${!k}" >> "$f"; done
+}
+# Like settings_write, but skips the safety toggles — used for the GLOBAL
+# defaults so a saved default can never silently arm shell/auto-accept in a new
+# session (#60). Session files still use settings_write (safety is per-session).
+settings_write_defaults() {
+    local f="$1" k; [[ -z "$f" ]] && return 0
+    mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+    : > "$f" 2>/dev/null || return 0
+    for k in "${CHATI_SETTINGS_KEYS[@]}"; do
+        chati_is_safety_key "$k" && continue
+        printf '%s=%s\n' "$k" "${!k}" >> "$f"
+    done
 }
 # Read a settings file into the runtime toggles (known keys only), then refresh
 # the derived state (colors, speech rate). Returns 1 if the file is absent.
@@ -356,6 +375,31 @@ reload_settings_announce() {
         echo "       /sY to re-arm it here, or /back to return to the previous session."
     fi
 }
+# Carry PREFERENCES (everything but the safety toggles) from the session you are
+# leaving into a freshly created one, so /new keeps your voice/language/colors/
+# web/thinking instead of resetting them. Snapshot the live values, then re-apply
+# them after the new session has loaded its (empty) baseline. Safety toggles are
+# skipped, so shell/auto-accept still reset to off in the new session.
+CHATI_CARRY_PREFS=()
+carry_prefs_snapshot() {
+    CHATI_CARRY_PREFS=()
+    local k
+    for k in "${CHATI_SETTINGS_KEYS[@]}"; do
+        chati_is_safety_key "$k" && continue
+        CHATI_CARRY_PREFS+=("$k=${!k}")
+    done
+}
+carry_prefs_apply() {
+    local kv k v
+    for kv in "${CHATI_CARRY_PREFS[@]}"; do
+        k="${kv%%=*}"; v="${kv#*=}"
+        printf -v "$k" '%s' "$v"
+    done
+    USER_COLOR=$(ansi_color "$USER_COLOR_NAME"); AI_COLOR=$(ansi_color "$AI_COLOR_NAME")
+    update_say_rate
+    persist_session_settings 2>/dev/null   # bake them into the new session too
+}
+
 # Clean-exit handler: flush command history AND the current session's settings.
 chati_on_exit() {
     history -w "$HISTFILE" 2>/dev/null
@@ -1560,8 +1604,8 @@ while true; do
             /defaults)
                 # The editable global defaults a NEW session inherits (#37).
                 if [[ "$cmd_args" == save ]]; then
-                    settings_write "$DEFAULTS_SETTINGS_FILE"
-                    echo "💾 Saved current settings as the default for NEW sessions."
+                    settings_write_defaults "$DEFAULTS_SETTINGS_FILE"
+                    echo "💾 Saved current settings as the default for NEW sessions (shell/auto-accept excluded — arm those per session)."
                 elif [[ "$cmd_args" == clear || "$cmd_args" == reset ]]; then
                     rm -f "$DEFAULTS_SETTINGS_FILE"
                     echo "🧹 Cleared the global defaults (new sessions start from built-in defaults)."
@@ -1598,7 +1642,7 @@ while true; do
                 fi
                 ;;
             /sessions)   "$MOLA_CMD" list ;;
-            /new)        persist_session_settings; "$MOLA_CMD" new "$cmd_args"; reload_settings_announce ;;
+            /new)        persist_session_settings; carry_prefs_snapshot; "$MOLA_CMD" new "$cmd_args"; reload_settings_announce; carry_prefs_apply ;;
             /switch)     persist_session_settings; "$MOLA_CMD" switch "$cmd_args"; reload_settings_announce ;;
             /back)       persist_session_settings; "$MOLA_CMD" back; reload_settings_announce ;;
             # $cmd_args is left unquoted on purpose so "3 new_name" splits
