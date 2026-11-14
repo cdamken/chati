@@ -344,7 +344,12 @@ sub convert {
   $s =~ s/\^\{([^{}]+)\}/my $r=supize($1); defined $r ? $r : "^{$1}"/ge;
   $s =~ s/\^([0-9+\-])/my $r=supize($1); defined $r ? $r : "^$1"/ge;
   $s =~ s/_\{([^{}]+)\}/my $r=subize($1); defined $r ? $r : "_{$1}"/ge;
-  $s =~ s/_([0-9+\-])/my $r=subize($1); defined $r ? $r : "_$1"/ge;
+  # Bare subscript: ONLY an isolated digit attached to a symbol (x_2, a_5), never
+  # a digit that is part of a filename / version / identifier (CB_20269, v_1.4.1,
+  # name_-_x). The old rule turned every "_<digit>" into a subscript and mangled
+  # file names. Require an alnum before the "_" and a non-identifier char after
+  # the digit; the braced form _{...} above still handles the rest.
+  $s =~ s/(?<=[0-9A-Za-z])_([0-9])(?![0-9A-Za-z._\-])/my $r=subize($1); defined $r ? $r : "_$1"/ge;
   return $s;
 }
 sub process_line {

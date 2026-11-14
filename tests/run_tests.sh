@@ -1883,6 +1883,18 @@ test_prettify_preserves_snake_case() {
 }
 run_test "prettify leaves snake_case identifiers alone" test_prettify_preserves_snake_case
 
+test_prettify_leaves_filenames_with_digits() {
+    # Regression: "_<digit>" inside a filename / version / identifier must NOT turn
+    # into a subscript — CB_20269, foo_1.4.1_1774231091 and name_-_x all got
+    # mangled before. A genuinely isolated subscript (x_2) still converts.
+    local r
+    r=$(printf '%s' 'CB_20269_AE12CL01.pdf foo_1.4.1_1774231091 Marke_-_Joel' | prettify_stream)
+    assert_eq "$r" 'CB_20269_AE12CL01.pdf foo_1.4.1_1774231091 Marke_-_Joel' "filename digits untouched" || return 1
+    r=$(printf '%s' 'the term x_2 here' | prettify_stream)
+    assert_eq "$r" 'the term x₂ here' "isolated subscript still converts"
+}
+run_test "prettify leaves _digit in filenames/versions alone" test_prettify_leaves_filenames_with_digits
+
 # --- Compare-not-OCR routing (OCR is only for reading the exact text) --------
 # Pull the file-comparison helpers out of chati (they only need expand_path
 # from the lib we already sourced) and exercise them on real files.
