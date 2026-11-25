@@ -66,6 +66,13 @@ sanitize_session_name() {
     name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | sed 's/[^a-z0-9_-]/_/g')
     name="${name##_}"
     name="${name%%_}"
+    # A session file ending in a reserved companion suffix is hidden by
+    # list_session_files (it skips _summary/_prompt/_settings/_compressed_at), so
+    # an autorename to e.g. "medical_report_summary" made the session vanish from
+    # the list. Append a marker so the name stays listable.
+    case "$name" in
+        *_summary|*_prompt|*_settings|*_compressed_at) name="${name}_chat" ;;
+    esac
     echo "$name"
 }
 

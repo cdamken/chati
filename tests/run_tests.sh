@@ -1015,6 +1015,17 @@ test_ollama_host_mirrors_api() {
 }
 run_test "OLLAMA_HOST stays in lock-step with OLLAMA_API" test_ollama_host_mirrors_api
 
+# --- session names never end in a companion-file suffix (#16) ---
+test_session_name_no_companion_suffix() {
+    eval "$(awk '/^sanitize_session_name\(\) \{/,/^}$/' "$PROJECT_DIR/ola_chat/mola")"
+    assert_eq "$(sanitize_session_name 'Medical Report Summary')" "medical_report_summary_chat" \
+        "a name ending in _summary gets a marker so the session stays listable" || return 1
+    assert_eq "$(sanitize_session_name 'quarterly prompt')" "quarterly_prompt_chat" \
+        "_prompt suffix guarded too" || return 1
+    assert_eq "$(sanitize_session_name 'my notes')" "my_notes" "ordinary name unchanged"
+}
+run_test "session names avoid companion-file suffixes (_summary/_prompt/...)" test_session_name_no_companion_suffix
+
 # --- per-terminal model with global fallback (#37 part 2) ---
 test_active_model_two_tier() {
     local gi="$SANDBOX/gm.txt" pi="$SANDBOX/pi.txt"

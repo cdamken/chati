@@ -2075,6 +2075,9 @@ while true; do
     raw_user_msg="$msg"
 
     msg=$(augment_message "$msg")
+    # Ctrl-C during web research or OCR (both run inside augment_message) should
+    # drop back to the prompt, not go on to query the model with partial notes.
+    if (( ${_chati_interrupted:-0} )); then echo; continue; fi
 
     # Sync the agent capability instruction with the current /a toggle.
     # When ON, ola's payload builder reads OLA_EXTRA_SYSTEM and adds it

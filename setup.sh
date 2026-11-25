@@ -186,6 +186,12 @@ done
 if [[ "$UPDATE_MODE" -eq 1 ]]; then
     [[ -d "$HOME/openwebui" ]]            && WANT_WEBUI=1   || WANT_WEBUI=0
     [[ -f "$HOME/searxng/settings.yml" ]] && WANT_SEARXNG=1 || WANT_SEARXNG=0
+    # A code re-apply must NOT pull models: the box already has the set it was
+    # installed with. Without this, every `chati --upgrade` re-ran the model
+    # section — re-verifying the extras each time, and on a --no-pull/--minimal
+    # box it could download the full ~17 GB set it was installed WITHOUT. An
+    # explicit `--update --model X` still pulls that one model.
+    [[ "$MODEL_EXPLICIT" -eq 1 ]] || WANT_PULL=0
 fi
 
 # ---- Uninstall path (--remove-all) ------------------------------------------
