@@ -73,9 +73,13 @@ create_backup() {
     rm -rf "$staging"
     mkdir -p "$staging/data" || error_exit "Failed to create staging directory"
 
-    # Data directory contents (uploads, vector_db, ...), if any.
+    # Data directory contents (uploads, vector_db, ...), if any. Use the portable
+    # "/." idiom to copy CONTENTS flat into $staging/data: a trailing-slash source
+    # (cp -R src/ dest/) copies contents on BSD/macOS but NESTS into dest/<basename>
+    # on GNU/Linux, which would bury uploads/vector_db a level too deep and lose them
+    # on restore (the db-strip below and restore both expect them flat) (D6).
     if [[ -d "$OPENWEBUI_DATA_DIR" ]] && [[ -n "$(ls -A "$OPENWEBUI_DATA_DIR" 2>/dev/null)" ]]; then
-        cp -R "$OPENWEBUI_DATA_DIR/" "$staging/data/" 2>/dev/null
+        cp -R "$OPENWEBUI_DATA_DIR/." "$staging/data/" 2>/dev/null
         # The live cp of a hot WAL-mode DB can be torn; replaced below
         # with a consistent sqlite3 snapshot.
         rm -f "$staging/data/webui.db" "$staging/data/webui.db-wal" "$staging/data/webui.db-shm"

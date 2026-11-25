@@ -216,6 +216,20 @@ test_install_webui_guards() {
 }
 run_test "install_webui.sh keeps backup + uv-owned Python + safe restore" test_install_webui_guards
 
+# D6: the OpenWebUI backup must copy data-dir CONTENTS with the portable "/." idiom.
+# `cp -R src/ dest/` copies contents on BSD but nests into dest/<basename> on GNU,
+# which buries uploads/vector_db and loses them on restore.
+test_webui_backup_copies_contents_portably() {
+    local f="$PROJECT_DIR/installer/install_webui.sh"
+    [[ -f "$f" ]] || return 0   # installer is optional in some checkouts
+    grep -q 'cp -R "\$OPENWEBUI_DATA_DIR/\." "\$staging/data/"' "$f" \
+        || { echo "backup must use cp -R \"\$OPENWEBUI_DATA_DIR/.\" (portable contents copy)" >&2; return 1; }
+    if grep -q 'cp -R "\$OPENWEBUI_DATA_DIR/" "\$staging/data/"' "$f"; then
+        echo "backup still uses the trailing-slash form that nests on GNU (D6)" >&2; return 1
+    fi
+}
+run_test "OpenWebUI backup copies data contents portably (D6)" test_webui_backup_copies_contents_portably
+
 test_setup_searxng_case_not_shadowed() {
     # Regression (#88): --searxng appeared twice in the arg case; the first match
     # (WANT_SEARXNG=1) shadowed the second, so `--client H --searxng URL` never
