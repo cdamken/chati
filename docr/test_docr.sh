@@ -96,6 +96,53 @@ else
 fi
 
 #------------------------------------------------------------------------------
+echo "D1: combine_pdf_outputs orders pages numerically (10+ pages)"
+#------------------------------------------------------------------------------
+TMP="$(mktemp -d)"
+for n in 1 2 9 10 11 12; do printf 'PAGE%d\n' "$n" > "$TMP/ocr_doc_page$(printf '%04d' "$n").txt"; done
+combine_pdf_outputs "doc" "$TMP" >/dev/null 2>&1
+combined="$TMP/ocr_doc.txt"
+order="$(grep -o 'PAGE[0-9]*' "$combined" 2>/dev/null | sed 's/PAGE//' | tr '\n' ' ')"
+if [[ "$order" == "1 2 9 10 11 12 " ]]; then ok "pages combined in numeric order"; else bad "pages combined in numeric order" "got: '$order'"; fi
+# A set with no page files must FAIL, not look like one page (nullglob, D5).
+if combine_pdf_outputs "nonexistent_base" "$TMP" >/dev/null 2>&1; then
+    bad "empty page set returns non-zero" "returned 0 (literal-glob bug)"
+else
+    ok "empty page set returns non-zero (nullglob)"
+fi
+rm -rf "$TMP"
+
+#------------------------------------------------------------------------------
+echo "D2/D3/D4: AI side-queries and language detection"
+#------------------------------------------------------------------------------
+# D2: internal AI queries go through run_ai_side_query (sends the prompt TEXT and
+# isolates the session), never a direct command-substitution call on $chat_cmd
+# (which sent the model the temp-file PATH as the message).
+if grep -q 'run_ai_side_query' "$DOCR" && ! grep -qF '$("$chat_cmd"' "$DOCR"; then
+    ok "AI side-queries use run_ai_side_query (text, isolated session)"
+else
+    bad "AI side-queries use run_ai_side_query" "a direct \$(\$chat_cmd …) call remains"
+fi
+# D3: detection progress must go to stderr so the caller captures only the code.
+if awk '/^detect_language_with_ai\(\)/{f=1} f' "$DOCR" | grep -q 'Analyzing text for language.*>&2'; then
+    ok "detect_language_with_ai progress -> stderr"
+else
+    bad "detect_language_with_ai progress -> stderr"
+fi
+# D3: the detected language must actually drive the OCR run.
+if grep -q 'CURRENT_LANG="\$DETECTED_LANGUAGE"' "$DOCR"; then
+    ok "detected language applied to the OCR run"
+else
+    bad "detected language applied to the OCR run"
+fi
+# D4: the olmocr2 base64 image must go via --rawfile (argv-size-safe on Linux).
+if grep -q 'rawfile img' "$DOCR" && ! grep -q -- '--arg img' "$DOCR"; then
+    ok "olmocr2 image via --rawfile (not argv)"
+else
+    bad "olmocr2 image via --rawfile" "still uses --arg img (128KB argv limit)"
+fi
+
+#------------------------------------------------------------------------------
 # Opt-in live engine tests
 #------------------------------------------------------------------------------
 if [[ "${DOCR_LIVE_TESTS:-0}" == "1" ]]; then

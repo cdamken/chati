@@ -129,13 +129,20 @@ run_engine_olmocr2() {
     for dep in curl jq base64; do
         command -v "$dep" >/dev/null 2>&1 || { echo "✗ Error: '$dep' required for the olmocr2 engine" >&2; return 1; }
     done
-    local b64 body resp
-    b64="$(base64 -i "$image" 2>/dev/null | tr -d '\n')"
-    [[ -n "$b64" ]] || b64="$(base64 < "$image" 2>/dev/null | tr -d '\n')"
-    if [[ -z "$b64" ]]; then echo "✗ Error: could not read image '$image'" >&2; return 1; fi
-    body="$(jq -n --arg m "$OLMOCR_MODEL" --arg p "$OLMOCR_PROMPT" --arg img "$b64" \
+    local b64file body resp
+    # Base64 of a real scan is hundreds of KB to a few MB. Passing it to jq as a
+    # command-line string argument makes it a single ARGV element, and Linux caps one
+    # argument at 128 KB (MAX_ARG_STRLEN), so jq dies with "Argument list too long"
+    # on anything but a tiny image (macOS's higher limit hid this). Write it to a
+    # file and feed it with --rawfile, which isn't subject to the argv limit (D4).
+    b64file="$(mktemp)" || { echo "✗ Error: could not create a temp file" >&2; return 1; }
+    base64 -i "$image" 2>/dev/null | tr -d '\n' > "$b64file"
+    [[ -s "$b64file" ]] || base64 < "$image" 2>/dev/null | tr -d '\n' > "$b64file"
+    if [[ ! -s "$b64file" ]]; then rm -f "$b64file"; echo "✗ Error: could not read image '$image'" >&2; return 1; fi
+    body="$(jq -n --arg m "$OLMOCR_MODEL" --arg p "$OLMOCR_PROMPT" --rawfile img "$b64file" \
                   --argjson ctx "$OLMOCR_NUM_CTX" \
                   '{model:$m, prompt:$p, images:[$img], stream:false, options:{num_ctx:$ctx}}')"
+    rm -f "$b64file"
     resp="$(printf '%s' "$body" | curl -s --max-time 300 "${OLMOCR_HOST}/api/generate" -d @- | jq -r '.response // empty')"
     if [[ -z "$resp" ]]; then
         echo "✗ Error: olmocr2 returned no text (is Ollama running and '$OLMOCR_MODEL' pulled?)" >&2
@@ -189,6 +196,23 @@ find_chat_command() {
     return 1
 }
 
+# Run an internal AI side-query (word-quality or language detection) and print the
+# raw reply. Two things the old inline calls got wrong (D2):
+#   * The chat command takes the prompt as its MESSAGE argument, so it must get the
+#     prompt TEXT. Passing the temp-file PATH sent the model the literal "/tmp/…"
+#     string, so the analysis never actually saw the prompt.
+#   * Those commands append the turn to the live conversation. Point CHATI_DATA_HOME
+#     at a throwaway dir so these internal turns don't pollute the user's session;
+#     the endpoint config lives in the repo .env, not here, so the chat still works.
+run_ai_side_query() {
+    local chat_cmd="$1" prompt_file="$2"
+    [[ -n "$chat_cmd" && -f "$prompt_file" ]] || return 1
+    local scratch; scratch=$(mktemp -d) || return 1
+    CHATI_DATA_HOME="$scratch" "$chat_cmd" "$(cat "$prompt_file")" 2>/dev/null
+    [[ -n "$scratch" && -d "$scratch" ]] && rm -rf "$scratch" 2>/dev/null
+    return 0
+}
+
 # Function to analyze word quality using AI
 analyze_word_quality() {
     local text_file="$1"
@@ -224,7 +248,7 @@ Respond with only the number:
 EOF
     
     # Get AI assessment
-    local quality_response=$("$chat_cmd" "$temp_file" 2>/dev/null | grep -o '[0-9][0-9]*' | head -1)
+    local quality_response=$(run_ai_side_query "$chat_cmd" "$temp_file" | grep -o '[0-9][0-9]*' | head -1)
     
     rm "$temp_file"
     
@@ -248,11 +272,12 @@ detect_language_with_ai() {
         return 1
     fi
     
-    echo -n "🤖 Analyzing text for language detection... "
-    
-    # Debug: Show what we're analyzing
-    echo ""
-    echo "   Sample: $(echo "$sample_text" | tr '\n' ' ' | cut -c1-100)..."
+    # Progress/debug goes to STDERR: this function's STDOUT is captured by the
+    # caller as the detected language code, so a single stray echo here would make
+    # the result "🤖 Analyzing…\n…\ndeu" and never match ^[a-z]{3}$ (D3).
+    echo -n "🤖 Analyzing text for language detection... " >&2
+    echo "" >&2
+    echo "   Sample: $(echo "$sample_text" | tr '\n' ' ' | cut -c1-100)..." >&2
     
     # Create temporary file with sample text
     local temp_file=$(mktemp)
@@ -285,8 +310,8 @@ If mainly English terms, respond with: eng
 Respond with ONLY the 3-letter code (deu, eng, fra, spa, etc.):
 EOF
     
-    # Use file chat command to analyze the text
-    local ai_response=$("$chat_cmd" "$temp_file" 2>/dev/null | grep -o '\b[a-z][a-z][a-z]\b' | head -1)
+    # Use the chat command to analyze the text (prompt TEXT, isolated session)
+    local ai_response=$(run_ai_side_query "$chat_cmd" "$temp_file" | grep -o '\b[a-z][a-z][a-z]\b' | head -1)
     
     rm "$temp_file"
     
@@ -807,6 +832,13 @@ process_file() {
             echo "Warning: Quality test failed, using standard settings"
             OPTIMAL_SETTINGS="$DEFAULT_DPI"
         fi
+        # Apply the language the first-page test detected (German banking terms or
+        # AI detection) to the ACTUAL OCR run. Without this the detection is computed
+        # and even printed as "Language: $DETECTED_LANGUAGE", but every page is still
+        # OCR'd in the original CURRENT_LANG (D3).
+        if [[ -n "${DETECTED_LANGUAGE:-}" && "$DETECTED_LANGUAGE" != "$CURRENT_LANG" ]]; then
+            CURRENT_LANG="$DETECTED_LANGUAGE"
+        fi
     fi
     
     # Extract optimal settings
@@ -852,7 +884,10 @@ process_file() {
         local page_num=1
         for page in "$pdf_temp_dir"/page-*.png; do
             echo "Processing page $page_num..."
-            process_single_image "$page" "$CURRENT_LANG" "$OCR_OUTPUTS" "${FILENAME_WITHOUT_EXT}_page${page_num}"
+            # Zero-pad the page number so the combine step's glob sorts pages in
+            # NUMERIC order. Unpadded, a lexical glob gives page1, page10, page2…
+            # and scrambles any PDF with 10+ pages (D1).
+            process_single_image "$page" "$CURRENT_LANG" "$OCR_OUTPUTS" "$(printf '%s_page%04d' "$FILENAME_WITHOUT_EXT" "$page_num")"
             ((page_num++))
         done
         rm -rf "$pdf_temp_dir"
@@ -1022,12 +1057,14 @@ $ocr_text"
         # Fallback to chat commands (ph, ph2, nls) for summarization
         local chat_cmd=$(find_chat_command)
         if [[ -n "$chat_cmd" ]]; then
-            # Create temporary file with OCR text
+            # Send the full prompt (instruction + OCR text) as the message, the same
+            # $ai_prompt the Ollama path uses — not the temp-file PATH plus a separate
+            # instruction arg, which made the model see "/tmp/… <instruction>" and
+            # never the document. Isolated session so the summary doesn't pollute the
+            # user's conversation (D2).
             local temp_file=$(mktemp)
-            echo "$ocr_text" > "$temp_file"
-            
-            # Use chat command with proper summarization instruction
-            ai_summary=$("$chat_cmd" "$temp_file" "$summary_instruction Focus on main topics, key information, and document type/purpose. Keep it under 200 words." 2>/dev/null | head -20)
+            printf '%s' "$ai_prompt" > "$temp_file"
+            ai_summary=$(run_ai_side_query "$chat_cmd" "$temp_file" | head -20)
             rm "$temp_file"
         else
             # Final fallback to basic text analysis
@@ -1225,18 +1262,26 @@ combine_pdf_outputs() {
     local versioned_combined_file=$(get_versioned_filename "$base_combined_file" "txt")
     local temp_file=$(mktemp)
     
-    # Find all pages for this PDF
+    # Find all pages for this PDF. nullglob so a pattern that matches nothing gives
+    # an EMPTY array, not the literal pattern as one element — otherwise a run where
+    # every page failed would look like one page and report success (D5). Pages are
+    # zero-padded (_page0001…), so a lexical glob is already in numeric order (D1).
+    local _ng=1; [[ -o nullglob ]] || _ng=0; shopt -s nullglob
     local pages=("${output_dir}/ocr_${base_name}_page"*.txt)
-    
+    (( _ng )) || shopt -u nullglob
+
     # Check if we found any pages
     if [ ${#pages[@]} -eq 0 ]; then
         echo "No pages found for $base_name"
+        rm -f "$temp_file"
         return 1
     fi
-    
+
     # Add page markers and combine
     for page in "${pages[@]}"; do
+        # Strip leading zeros so the marker reads "Page 7", not "Page 0007".
         page_num=$(echo "$page" | grep -o 'page[0-9]*' | grep -o '[0-9]*')
+        page_num=$((10#${page_num:-0}))
         echo -e "\n=== Page $page_num ===\n" >> "$temp_file"
         cat "$page" >> "$temp_file"
         rm "$page"  # Remove individual page file
