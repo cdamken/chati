@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.2] - 2026-11-25
+
+### Changed
+- **Shell mode and auto-accept stay on once you turn them on.** `/new`,
+  `/switch` and `/back` used to reset them, so you had to type `/s` or `/sY`
+  again in every conversation. They now stay exactly as you left them until you
+  turn them off. After each session change chati says so when they are armed,
+  so an active auto-accept is never silent. They are still never saved as
+  global defaults.
+
 ## [1.38.1] - 2026-11-25
 
 More fixes from the code review: OCR, hints when Ollama runs on another
