@@ -58,8 +58,22 @@ chati_load_env() {
     set +a
 }
 
-# The configured Ollama base URL (default local).
-chati_ollama_api() { printf '%s' "${OLLAMA_API:-http://localhost:11434}"; }
+# The configured Ollama base URL (default local). Derives from OLLAMA_HOST when
+# only that is set (a common .env has OLLAMA_HOST and no OLLAMA_API), so --doctor
+# and --status probe the SAME endpoint the chat uses instead of always localhost.
+# Mirrors resolve_ollama_api in lib_chat.sh, which doctor/status don't source.
+chati_ollama_api() {
+    if [[ -n "${OLLAMA_API:-}" ]]; then printf '%s' "$OLLAMA_API"; return 0; fi
+    local h="${OLLAMA_HOST:-}"
+    if [[ -n "$h" ]]; then
+        case "$h" in
+            http://*|https://*) printf '%s' "${h//0.0.0.0/localhost}"; return 0 ;;
+        esac
+        [[ "$h" != *:* ]] && h="$h:11434"
+        printf 'http://%s' "${h//0.0.0.0/localhost}"; return 0
+    fi
+    printf '%s' "http://localhost:11434"
+}
 
 # --- Local service lifecycle (powers `chati --status` and `chati --stop`) ---------
 # chati keeps the local AI services simple: Ollama starts on demand when you

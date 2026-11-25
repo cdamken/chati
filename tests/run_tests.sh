@@ -1015,6 +1015,19 @@ test_ollama_host_mirrors_api() {
 }
 run_test "OLLAMA_HOST stays in lock-step with OLLAMA_API" test_ollama_host_mirrors_api
 
+# --- chati_ollama_api (doctor/status) derives from OLLAMA_HOST (#10) ---
+test_common_ollama_api_from_host() {
+    # chati-doctor/--status source chati-common.sh (not lib_chat.sh), so its own
+    # chati_ollama_api must also derive the endpoint from OLLAMA_HOST, or a .env
+    # with only OLLAMA_HOST makes them probe localhost instead of the real host.
+    eval "$(awk '/^chati_ollama_api\(\) \{/,/^}$/' "$PROJECT_DIR/chati-common.sh")"
+    assert_eq "$(OLLAMA_API='' OLLAMA_HOST='box:11434' chati_ollama_api)" "http://box:11434" "host:port -> url" || return 1
+    assert_eq "$(OLLAMA_API='' OLLAMA_HOST='box' chati_ollama_api)" "http://box:11434" "bare host -> +port" || return 1
+    assert_eq "$(OLLAMA_API='http://x:1' OLLAMA_HOST='box' chati_ollama_api)" "http://x:1" "explicit API wins" || return 1
+    assert_eq "$(OLLAMA_API='' OLLAMA_HOST='' chati_ollama_api)" "http://localhost:11434" "empty -> localhost"
+}
+run_test "chati_ollama_api derives endpoint from OLLAMA_HOST (doctor/status)" test_common_ollama_api_from_host
+
 # --- session names never end in a companion-file suffix (#16) ---
 test_session_name_no_companion_suffix() {
     eval "$(awk '/^sanitize_session_name\(\) \{/,/^}$/' "$PROJECT_DIR/ola_chat/mola")"

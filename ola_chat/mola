@@ -330,17 +330,24 @@ compress_memory() {
 
     # Best-effort lock so two background jobs don't clobber the same summary.
     local lock="$HISTORY_DIR/${sess_name}_summary.lock"
-    # chati runs compaction in the background; if that job is killed, the mkdir
-    # lock is left behind and would block ALL future compaction for this session.
-    # Clear a lock older than 2 minutes (compaction is far quicker) as stale.
-    if [[ -d "$lock" && -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]]; then
-        rmdir "$lock" 2>/dev/null
+    # Stale-lock recovery: chati runs compaction in the background, so a killed
+    # job would leave the mkdir lock and block ALL future compaction. Decide
+    # staleness by LIVENESS, not a short timer — compaction calls the model and a
+    # cold load can run minutes. The holder writes its PID; if that process is
+    # gone the lock is stale. A 30-minute cap is a backstop against PID reuse.
+    if [[ -d "$lock" ]]; then
+        local lpid; lpid=$(cat "$lock/pid" 2>/dev/null)
+        if { [[ -n "$lpid" ]] && ! kill -0 "$lpid" 2>/dev/null; } \
+           || [[ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]]; then
+            rm -rf "$lock" 2>/dev/null
+        fi
     fi
     if ! mkdir "$lock" 2>/dev/null; then
         log_chat "compress: skipping '$sess_name' (lock held)"
         return 0
     fi
-    trap 'rmdir "$lock" 2>/dev/null' RETURN
+    printf '%s\n' "$$" > "$lock/pid" 2>/dev/null
+    trap 'rm -rf "$lock" 2>/dev/null' RETURN
 
     echo -n "🌀 Compacting memory for '$sess_name'... "
     local model

@@ -237,6 +237,11 @@ history -r "$HISTFILE"
 set +o history
 # Flush history once at exit instead of after every keystroke.
 trap 'chati_on_exit' EXIT   # flush history + persist this session's settings (#37)
+# A window close (SIGHUP) or kill (SIGTERM) terminates the shell WITHOUT running
+# the EXIT trap, so the conversation and settings would be lost. Catch them, save,
+# then exit — which re-fires EXIT, but chati_on_exit guards against running twice.
+trap 'chati_on_exit; exit 129' HUP
+trap 'chati_on_exit; exit 143' TERM
 
 # --- STATE ---
 LAST_RESPONSE=""
@@ -402,6 +407,10 @@ carry_prefs_apply() {
 
 # Clean-exit handler: flush command history AND the current session's settings.
 chati_on_exit() {
+    # Runs from the EXIT trap and from the HUP/TERM handlers; guard so the save
+    # and settings-persist happen exactly once.
+    [[ -n "${_chati_exited:-}" ]] && return 0
+    _chati_exited=1
     # Save the live conversation to its session file on ANY exit, not just /bye.
     # Ctrl-D (EOF breaks the loop) and a terminal close both land here; without
     # this they lost everything said since the last explicit save.
