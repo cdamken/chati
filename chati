@@ -1182,6 +1182,9 @@ detect_ocrable_in_msg() {
     # Split on whitespace WITHOUT filename globbing: a normal message like
     # "what is 6 * 7" in a folder with invoice.pdf must not expand '*' into real
     # files and trigger auto-OCR. Restore the caller's noglob state after.
+    # Deliberate tradeoff (R3): an explicit glob in prose (e.g. "read /docs/*.pdf")
+    # is NOT expanded either — prose is treated literally. To OCR/attach by glob,
+    # use /ocr or /file, which expand their arguments on purpose.
     local _ng=1; [[ -o noglob ]] || _ng=0; set -f
     for tok in $msg; do
         tok="${tok//$sentinel/ }"         # restore the spaces
