@@ -283,6 +283,39 @@ test_save_on_exit_no_signal_traps() {
 }
 run_test "save-on-exit rides the EXIT trap, no HUP/TERM traps (#8/R2)" test_save_on_exit_no_signal_traps
 
+# U1: release-mode upgrade installs the release TAG, not origin/main's tip —
+# otherwise commits pushed after the tag run (as root, on a system install).
+test_upgrade_release_pins_tag() {
+    cd "$PROJECT_DIR" || return 1
+    local f="$PROJECT_DIR/chati" body
+    body=$(awk '/^chati_self_update\(\) \{/,/^}$/' "$f")
+    # Release branch (the else of the track_ref test) must fetch tags and check
+    # out v$latest, and must NOT `git pull` the branch tip.
+    printf '%s' "$body" | grep -q 'fetch --quiet --tags origin' \
+        || { echo "release upgrade must fetch tags" >&2; return 1; }
+    printf '%s' "$body" | grep -q 'checkout --quiet --detach "v$latest"' \
+        || { echo "release upgrade must check out the release tag v\$latest" >&2; return 1; }
+    if printf '%s' "$body" | grep -qE 'pull --ff-only'; then
+        echo "release upgrade must not pull the branch tip (runs unreleased code as root)" >&2
+        return 1
+    fi
+    # U1 hole: a dev checkout AHEAD of the tag must not be silently detached onto
+    # it; proceed only when HEAD is an ancestor of the release tag.
+    printf '%s' "$body" | grep -q 'merge-base --is-ancestor HEAD "v$latest"' \
+        || { echo "release upgrade must refuse a checkout ahead of the tag (U1)" >&2; return 1; }
+}
+run_test "release-mode upgrade pins the release tag, not main's tip (U1)" test_upgrade_release_pins_tag
+
+# M2: the fallback / stale-selection model picker must skip embedding-only models
+# (bge-*/*-embed), which can't chat, instead of blindly taking head -1.
+test_ensure_valid_model_skips_embeddings() {
+    cd "$PROJECT_DIR" || return 1
+    local body; body=$(awk '/^ensure_valid_model\(\) \{/,/^}$/' "$PROJECT_DIR/chati")
+    printf '%s' "$body" | grep -q "grep -viE 'embed|\^bge-'" \
+        || { echo "ensure_valid_model must skip embedding models when re-picking (M2)" >&2; return 1; }
+}
+run_test "ensure_valid_model skips embedding-only models (M2)" test_ensure_valid_model_skips_embeddings
+
 test_ollama_proc_pattern() {
     # The process-match pattern must catch ollama at a path/word boundary
     # but NOT a lookalike like "myollama serve". Eval the real value from

@@ -75,8 +75,32 @@ chati_self_update() {
     fi
     local before after
     before=$(git -C "$CHATI_DIR" rev-parse HEAD 2>/dev/null)
-    if ! git -C "$CHATI_DIR" pull --ff-only >/dev/null 2>&1; then
-        echo "chati: git pull failed. Try:  git -C \"$CHATI_DIR\" fetch origin && git -C \"$CHATI_DIR\" reset --hard origin/main" >&2
+    # Release mode: pin to the release TAG, not the branch tip. A plain
+    # fast-forward pull of the branch advances to origin/main's HEAD, pulling
+    # any commits pushed after the tag was cut, so the release tag must gate the
+    # CODE, not just whether to upgrade. Fetch tags and check out the exact
+    # released commit. Detached HEAD is non-destructive: local branches and
+    # commits are untouched, only HEAD moves to the released commit.
+    if ! git -C "$CHATI_DIR" fetch --quiet --tags origin 2>/dev/null; then
+        echo "chati: git fetch failed. Try:  git -C \"$CHATI_DIR\" fetch --tags origin" >&2
+        return 1
+    fi
+    # Don't strand a checkout that is AHEAD of the release tag. A dev checkout
+    # with local commits past the tag (e.g. the one feeding $PATH) has a clean
+    # working tree, so the porcelain guard misses it; detaching to the tag would
+    # drop those commits from the running code with no warning, and a later
+    # commit would land off-branch. Proceed only when HEAD is an ancestor of the
+    # tag (cleanly behind it); otherwise refuse (U1).
+    if ! git -C "$CHATI_DIR" merge-base --is-ancestor HEAD "v$latest" 2>/dev/null; then
+        echo "chati: $CHATI_DIR has local commits ahead of release v$latest;" >&2
+        echo "   installing the tag would drop them from the running code. Review:" >&2
+        echo "   git -C \"$CHATI_DIR\" log --oneline v$latest..HEAD" >&2
+        echo "   Push or branch them first." >&2
+        return 1
+    fi
+    if ! git -C "$CHATI_DIR" checkout --quiet --detach "v$latest" 2>/dev/null; then
+        echo "chati: couldn't check out release v$latest." >&2
+        echo "   Do it by hand:  git -C \"$CHATI_DIR\" fetch --tags origin && git -C \"$CHATI_DIR\" checkout v$latest" >&2
         return 1
     fi
     after=$(git -C "$CHATI_DIR" rev-parse HEAD 2>/dev/null)
@@ -1547,8 +1571,13 @@ ensure_valid_model() {
     installed=$(ollama list 2>/dev/null | tail -n +2 | awk 'NF{print $1}')
     [[ -z "$installed" ]] && return 0                 # nothing installed → active_model already warned elsewhere
     printf '%s\n' "$installed" | grep -qxF "$want" && return 0
+    # Pick the first installed model that can actually CHAT. head -1 alone could
+    # land on an embedding model (bge-m3, nomic-embed, *-embed) — common on a box
+    # that also serves embeddings — which returns empty/garbage and reproduces the
+    # very failure we're switching away from. Same filter as active_model (M2).
     local pick
-    pick=$(printf '%s\n' "$installed" | head -1)
+    pick=$(printf '%s\n' "$installed" | grep -viE 'embed|^bge-' | head -1)
+    pick=${pick:-$(printf '%s\n' "$installed" | head -1)}
     printf '%s\n' "$pick" > "$ACTIVE_MODEL_FILE"
     echo "⚠️  Selected model '$want' is not installed — switched to '$pick'."
     echo "    Change it anytime with /model, or install the original:"
