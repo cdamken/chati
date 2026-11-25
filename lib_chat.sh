@@ -132,6 +132,7 @@ resolve_ollama_api() {
     fi
     printf 'http://localhost:11434\n'
 }
+_orig_ollama_host="${OLLAMA_HOST:-}"
 export OLLAMA_API="$(resolve_ollama_api "${OLLAMA_API:-}" "${OLLAMA_HOST:-}")"
 # Keep OLLAMA_HOST (what the `ollama` CLI reads) in lock-step with the resolved
 # OLLAMA_API (what the chat's curl uses). Otherwise they can diverge: when the
@@ -142,7 +143,18 @@ export OLLAMA_API="$(resolve_ollama_api "${OLLAMA_API:-}" "${OLLAMA_HOST:-}")"
 # says "not running". Derive HOST from the final API so both always agree. For an
 # http:// endpoint this yields host:port; an https:// URL is kept whole (the CLI
 # accepts it).
-export OLLAMA_HOST="${OLLAMA_API#http://}"
+#
+# EXCEPTION (bind-all): a 0.0.0.0 / [::] OLLAMA_HOST is a *server bind* — setup.sh
+# recommends `OLLAMA_HOST=0.0.0.0:11434 ollama serve` for LAN/Tailscale. The chat
+# auto-starts `ollama serve` inheriting this var, so collapsing it to localhost
+# would bind the daemon to loopback only and kill LAN access. The client already
+# reaches it via OLLAMA_API (resolve_ollama_api maps 0.0.0.0 -> localhost), so
+# leave OLLAMA_HOST verbatim here and let `ollama serve` keep the bind.
+case "$_orig_ollama_host" in
+    *0.0.0.0*|*'[::]'*) : ;;   # bind-all: keep as-is for `ollama serve`
+    *) export OLLAMA_HOST="${OLLAMA_API#http://}" ;;
+esac
+unset _orig_ollama_host
 
 # Print reachable Ollama endpoints as "URL<TAB>version", one per line: localhost
 # plus online Tailscale peers on :11434. Powers the `/ollama` discovery picker.

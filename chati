@@ -235,13 +235,14 @@ export HISTIGNORE="set *:history *"
 history -c
 history -r "$HISTFILE"
 set +o history
-# Flush history once at exit instead of after every keystroke.
+# Flush history + persist settings + save the conversation once at exit, instead
+# of after every keystroke. bash runs the EXIT trap even when the shell is killed
+# by an untrapped SIGHUP (window close) or SIGTERM — verified on bash 3.2 (macOS)
+# and 5.3 (Linux): both fire EXIT and die with rc 129/143. So chati_on_exit alone
+# covers Ctrl-D, window close and kill. We deliberately do NOT trap HUP/TERM: a
+# trapped signal is deferred until the running foreground command returns, so a
+# `kill` landing mid-stream would hang until the stream finished (#8 regression).
 trap 'chati_on_exit' EXIT   # flush history + persist this session's settings (#37)
-# A window close (SIGHUP) or kill (SIGTERM) terminates the shell WITHOUT running
-# the EXIT trap, so the conversation and settings would be lost. Catch them, save,
-# then exit — which re-fires EXIT, but chati_on_exit guards against running twice.
-trap 'chati_on_exit; exit 129' HUP
-trap 'chati_on_exit; exit 143' TERM
 
 # --- STATE ---
 LAST_RESPONSE=""
@@ -407,8 +408,9 @@ carry_prefs_apply() {
 
 # Clean-exit handler: flush command history AND the current session's settings.
 chati_on_exit() {
-    # Runs from the EXIT trap and from the HUP/TERM handlers; guard so the save
-    # and settings-persist happen exactly once.
+    # Runs from the EXIT trap, which bash also fires on an untrapped SIGHUP (window
+    # close) or SIGTERM. Guard so the save and settings-persist happen exactly once
+    # even if something re-enters.
     [[ -n "${_chati_exited:-}" ]] && return 0
     _chati_exited=1
     # Save the live conversation to its session file on ANY exit, not just /bye.

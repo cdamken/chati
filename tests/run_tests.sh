@@ -264,6 +264,25 @@ test_no_retired_ailocal_hints() {
 }
 run_test "no retired 'ailocal <cmd>' hints in user messages" test_no_retired_ailocal_hints
 
+# --- #8/R2: save on exit via the EXIT trap, NOT via HUP/TERM handlers ---
+# bash fires the EXIT trap even on untrapped SIGHUP/SIGTERM (verified on bash 3.2
+# and 5.3), so chati_on_exit covers Ctrl-D, window close and kill. Trapping the
+# signals instead deferred them until the foreground stream returned — a mid-
+# stream `kill` would hang. Anchor both halves so neither regresses.
+test_save_on_exit_no_signal_traps() {
+    cd "$PROJECT_DIR" || return 1
+    local f="$PROJECT_DIR/chati"
+    awk '/^chati_on_exit\(\)/{g=1} g&&/MOLA_CMD" save/{print;exit}' "$f" | grep -q 'save' \
+        || { echo "chati_on_exit must save the conversation" >&2; return 1; }
+    grep -q "trap 'chati_on_exit' EXIT" "$f" \
+        || { echo "chati_on_exit must be wired to the EXIT trap" >&2; return 1; }
+    if grep -Eq "trap .* (HUP|TERM)\b" "$f"; then
+        echo "must NOT trap HUP/TERM (defers the signal until the stream ends)" >&2
+        return 1
+    fi
+}
+run_test "save-on-exit rides the EXIT trap, no HUP/TERM traps (#8/R2)" test_save_on_exit_no_signal_traps
+
 test_ollama_proc_pattern() {
     # The process-match pattern must catch ollama at a path/word boundary
     # but NOT a lookalike like "myollama serve". Eval the real value from
@@ -1011,7 +1030,22 @@ test_ollama_host_mirrors_api() {
     assert_eq "$h" "localhost:11434" "OLLAMA_HOST follows the resolved OLLAMA_API" || return 1
     h=$(env OLLAMA_API="https://box:11434" OLLAMA_HOST="other:1" \
         bash -c "source '$PROJECT_DIR/lib_chat.sh' 2>/dev/null; printf '%s' \"\$OLLAMA_HOST\"")
-    assert_eq "$h" "https://box:11434" "https endpoint keeps its scheme in OLLAMA_HOST"
+    assert_eq "$h" "https://box:11434" "https endpoint keeps its scheme in OLLAMA_HOST" || return 1
+
+    # R1 regression: a 0.0.0.0 / [::] bind is a SERVER bind (setup.sh recommends
+    # `OLLAMA_HOST=0.0.0.0:11434 ollama serve` for LAN). chati auto-starts
+    # `ollama serve` inheriting OLLAMA_HOST, so it must stay verbatim, not get
+    # collapsed to localhost (which binds loopback only). The client still reaches
+    # it through OLLAMA_API=localhost.
+    local out api host
+    out=$(env -u OLLAMA_API OLLAMA_HOST="0.0.0.0:11434" \
+        bash -c "source '$PROJECT_DIR/lib_chat.sh' 2>/dev/null; printf '%s\t%s' \"\$OLLAMA_API\" \"\$OLLAMA_HOST\"")
+    api=${out%%$'\t'*}; host=${out#*$'\t'}
+    assert_eq "$api"  "http://localhost:11434" "0.0.0.0: client API resolves to localhost" || return 1
+    assert_eq "$host" "0.0.0.0:11434"          "0.0.0.0: bind kept verbatim for ollama serve" || return 1
+    out=$(env -u OLLAMA_API OLLAMA_HOST="[::]:11434" \
+        bash -c "source '$PROJECT_DIR/lib_chat.sh' 2>/dev/null; printf '%s' \"\$OLLAMA_HOST\"")
+    assert_eq "$out" "[::]:11434" "[::] bind kept verbatim for ollama serve"
 }
 run_test "OLLAMA_HOST stays in lock-step with OLLAMA_API" test_ollama_host_mirrors_api
 
