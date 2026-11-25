@@ -88,6 +88,27 @@ chati_ollama_is_remote() {
     esac
 }
 
+# Classify an Ollama HTTP endpoint for diagnostics. Echoes one word:
+#   ok        -> /api/version answered 2xx
+#   forbidden -> the server answered, but with 403. Ollama bound to loopback
+#                (its default) rejects any Host header that isn't an IP,
+#                "localhost", or the machine's SHORT hostname. Reaching a
+#                Tailscale box by its full MagicDNS name (host.tailnet.ts.net)
+#                trips exactly this; the short name or the 100.x IP works.
+#   down      -> no HTTP answer at all (not running / not reachable / timeout)
+# A plain `curl -fsS` can't tell "forbidden" from "down" (both make it exit
+# non-zero), so this probes the status code explicitly. $1 overrides the
+# endpoint (default: the active one).
+chati_ollama_probe() {
+    local api="${1:-$(chati_ollama_api)}" code
+    code=$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "$api/api/version" 2>/dev/null)
+    case "$code" in
+        2??) echo "ok" ;;
+        403) echo "forbidden" ;;
+        *)   echo "down" ;;
+    esac
+}
+
 # --- Local service lifecycle (powers `chati --status` and `chati --stop`) ---------
 # chati keeps the local AI services simple: Ollama starts on demand when you
 # launch chati, SearXNG starts on demand when you use /web, and OpenWebUI is the

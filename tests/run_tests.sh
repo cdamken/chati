@@ -320,6 +320,17 @@ test_upgrade_release_pins_tag() {
 }
 run_test "release-mode upgrade pins the release tag, not main's tip (U1)" test_upgrade_release_pins_tag
 
+# The VERSION file and chati's CHATI_VERSION must agree: the upgrade reads VERSION
+# for the "Pulled chati $newver" line, so a drift announces the wrong version (and
+# misleads anything comparing against the file). A bump must touch BOTH.
+test_version_file_matches_chati_version() {
+    local cv fv
+    cv=$(grep -m1 '^CHATI_VERSION=' "$PROJECT_DIR/chati" | sed 's/.*="//; s/".*//')
+    fv=$(tr -d '[:space:]' < "$PROJECT_DIR/VERSION" 2>/dev/null)
+    assert_eq "$fv" "$cv" "VERSION file ($fv) must match chati's CHATI_VERSION ($cv)"
+}
+run_test "VERSION file matches CHATI_VERSION" test_version_file_matches_chati_version
+
 # M2: the fallback / stale-selection model picker must skip embedding-only models
 # (bge-*/*-embed), which can't chat, instead of blindly taking head -1.
 test_ensure_valid_model_skips_embeddings() {
@@ -1085,6 +1096,28 @@ test_compress_model_override() {
 }
 run_test "compress_model honours COMPRESS_MODEL override" test_compress_model_override
 
+# --- aux pickers on a chat+embedder-only box ---
+# A server may keep ONLY gemma4:26b-a4b-it-qat + bge-m3 installed. None of the
+# small preference models (llama3.2:3b, llama3.1:8b, ...) are present, so every
+# auxiliary picker must fall back to the active model (gemma4) and must NEVER
+# pick bge-m3 — an embedder can't chat and would yield empty/garbage output.
+test_aux_pickers_fall_back_to_chat_model_not_embedder() {
+    local orig_ol; orig_ol=$(declare -f ollama 2>/dev/null)
+    ollama() { [[ "$1" == "list" ]] && printf 'NAME\tID\ngemma4:26b-a4b-it-qat\tabc\nbge-m3:latest\tdef\n'; }
+    local am cm rm dm rc=0
+    am=$(DEFAULT_MODEL="gemma4:26b-a4b-it-qat" active_model)
+    cm=$(COMPRESS_MODEL="" DEFAULT_MODEL="gemma4:26b-a4b-it-qat" compress_model)
+    rm=$(WEB_ROUTER_MODEL="" DEFAULT_MODEL="gemma4:26b-a4b-it-qat" router_model)
+    dm=$(DECOMPOSE_MODEL="" DEFAULT_MODEL="gemma4:26b-a4b-it-qat" decompose_model)
+    [[ -n "$orig_ol" ]] && eval "$orig_ol" || unset -f ollama
+    assert_eq "$am" "gemma4:26b-a4b-it-qat" "active_model -> gemma4, not bge-m3"   || rc=1
+    assert_eq "$cm" "gemma4:26b-a4b-it-qat" "compress_model -> gemma4, not bge-m3" || rc=1
+    assert_eq "$rm" "gemma4:26b-a4b-it-qat" "router_model -> gemma4, not bge-m3"   || rc=1
+    assert_eq "$dm" "gemma4:26b-a4b-it-qat" "decompose_model -> gemma4, not bge-m3" || rc=1
+    return $rc
+}
+run_test "aux pickers fall back to chat model, never the embedder" test_aux_pickers_fall_back_to_chat_model_not_embedder
+
 # --- resolve_ollama_api: external Ollama endpoint (#39) ---
 test_resolve_ollama_api() {
     assert_eq "$(resolve_ollama_api '' '')"                  "http://localhost:11434"                  "empty -> localhost" || return 1
@@ -1121,6 +1154,36 @@ test_ollama_is_remote() {
     fi
 }
 run_test "ollama_is_remote classifies local vs remote endpoints (M4)" test_ollama_is_remote
+
+# --- chati_ollama_probe: tell a 403 (Host-header reject) apart from a dead box ---
+# Reaching a loopback-bound Ollama by its full *.ts.net name gets a 403, which a
+# plain `curl -fsS` can't distinguish from unreachable. The probe must classify
+# 2xx->ok, 403->forbidden, anything else (incl. curl's 000 on no connection)->down.
+test_chati_ollama_probe_classifies_403() {
+    local sh; sh=$(awk '/^chati_ollama_probe\(\) \{/,/^\}/' "$PROJECT_DIR/chati-common.sh")
+    local out
+    # Stub curl to emit a chosen status code into the -w sink (last arg is the URL).
+    out=$(FAKE_CODE=200 bash -c '
+        curl() { printf "%s" "$FAKE_CODE"; }
+        '"$sh"'
+        chati_ollama_probe "http://x:11434"')
+    assert_eq "$out" "ok" "2xx -> ok" || return 1
+    out=$(FAKE_CODE=403 bash -c '
+        curl() { printf "%s" "$FAKE_CODE"; }
+        '"$sh"'
+        chati_ollama_probe "http://x:11434"')
+    assert_eq "$out" "forbidden" "403 -> forbidden" || return 1
+    out=$(FAKE_CODE=000 bash -c '
+        curl() { printf "%s" "$FAKE_CODE"; }
+        '"$sh"'
+        chati_ollama_probe "http://x:11434"')
+    assert_eq "$out" "down" "000 (no connection) -> down" || return 1
+    # And chati-status must actually surface the short-name/IP hint on a 403.
+    grep -q 'chati_ollama_probe' "$PROJECT_DIR/libexec/chati-status" \
+        && grep -qi 'short hostname\|short name' "$PROJECT_DIR/libexec/chati-status" \
+        || { echo "chati-status must hint the short hostname/IP on a 403" >&2; return 1; }
+}
+run_test "chati_ollama_probe distinguishes 403 from unreachable" test_chati_ollama_probe_classifies_403
 
 # --- OLLAMA_HOST mirrors the resolved OLLAMA_API (/models vs chat divergence) ---
 test_ollama_host_mirrors_api() {

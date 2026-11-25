@@ -31,15 +31,24 @@ chati_load_env
 # --- Ollama (a LOCAL one auto-starts with chati; a remote one does not) ---
 if chati_ollama_is_remote; then
     # Remote endpoint: a local process check is meaningless; report reachability.
+    # Classify first so a 403 (server up, Host header rejected) doesn't read as
+    # a dead box — that distinction is the difference between "start Ollama" and
+    # "use the short hostname/IP".
     api="$(chati_ollama_api)"
-    ver=$(curl -fsS --max-time 2 "$api/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
-    if [ -n "$ver" ]; then
-        echo "Ollama:    REACHABLE  (remote $api, v$ver)"
-    elif curl -fsS --max-time 2 "$api/api/version" >/dev/null 2>&1; then
-        echo "Ollama:    REACHABLE  (remote $api)"
-    else
-        echo "Ollama:    unreachable  (remote $api — switch with /host, or /host local)"
-    fi
+    case "$(chati_ollama_probe "$api")" in
+        ok)
+            ver=$(curl -fsS --max-time 2 "$api/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
+            echo "Ollama:    REACHABLE  (remote $api${ver:+, v$ver})"
+            ;;
+        forbidden)
+            echo "Ollama:    403 forbidden  (remote $api answers but rejects the Host header)"
+            echo "                          Ollama bound to loopback only accepts an IP, localhost, or the short hostname."
+            echo "                          Point at the short name or the 100.x Tailscale IP, not the full *.ts.net name."
+            ;;
+        *)
+            echo "Ollama:    unreachable  (remote $api — switch with /host, or /host local)"
+            ;;
+    esac
 elif chati_svc_running "$CHATI_OLLAMA_PROC"; then
     ver=$(curl -fsS --max-time 2 "$(chati_ollama_api)/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
     echo "Ollama:    RUNNING${ver:+  (v$ver)}"
