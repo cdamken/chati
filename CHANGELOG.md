@@ -7,6 +7,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.1] - 2026-11-25
+
+More fixes from the code review: OCR, hints when Ollama runs on another
+machine, and two limits.
+
+### Fixed
+- **docr: PDFs of 10 or more pages were combined out of order** (1, 10, 11, 2).
+  Page files are now zero-padded, and an empty result is reported as a failure
+  instead of "Done".
+- **docr: the detected language was never used.** The detection captured its
+  own progress output, and the OCR ran with the previous language anyway.
+- **docr: the AI quality and language checks sent the model a temp-file path**
+  instead of the text, and added those turns to the live chat session.
+- **docr: the olmocr2 engine failed on real scans** because the image was
+  passed on the command line. It now goes through a file.
+- **Hints are aware of a remote Ollama.** Against a remote endpoint chati no
+  longer says `ollama serve` or `ollama pull` as if it were local, and
+  `chati --status` reports whether the remote is reachable instead of "stopped".
+  The dead `/ollama` reference is gone.
+- **OpenWebUI backup** copies the data folder contents portably.
+- **The model preload has a connect timeout,** so an unreachable remote no
+  longer hangs for minutes.
+- **Huge Shell-mode output is capped** before it is sent back to the model.
+
+### Changed
+- The docr tests run as part of the main test suite.
+
 ## [1.38.0] - 2026-11-25
 
 Fixes from a full code review of chati and its Linux sibling, plus an upgrade
