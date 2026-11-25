@@ -233,9 +233,13 @@ remove_all() {
                 sleep 1
             done
         fi
-        local to_rm; to_rm="$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')"
+        # Force the LOCAL server for list/rm. `ollama` obeys an exported
+        # OLLAMA_HOST, so without this a user pointed at a remote (via /host or
+        # .env) could have --remove-all delete models on that REMOTE box while
+        # uninstalling locally. The health check above already targets localhost.
+        local to_rm; to_rm="$(OLLAMA_HOST=localhost:11434 ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')"
         if [[ -n "$to_rm" ]]; then
-            printf '%s\n' "$to_rm" | while read -r m; do [[ -n "$m" ]] && ollama rm "$m" >/dev/null 2>&1 || true; done
+            printf '%s\n' "$to_rm" | while read -r m; do [[ -n "$m" ]] && OLLAMA_HOST=localhost:11434 ollama rm "$m" >/dev/null 2>&1 || true; done
             ok "Models removed ($(printf '%s' "$to_rm" | paste -sd, -))"
         else
             ok "No models to remove"

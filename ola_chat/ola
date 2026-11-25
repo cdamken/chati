@@ -95,6 +95,13 @@ rm -f "$MSG_TMP"
 # Truncate the message buffer back to before this user turn. Called on any
 # failure after the append so history stays consistent.
 rollback_user_turn() {
+    # First turn of a session: nothing came before, so empty the buffer. BSD/macOS
+    # `head -n 0` errors ("illegal line count -- 0") and would leave the failed
+    # user turn in the buffer, so handle 0 explicitly instead of via head.
+    if [[ "${MSG_LINES_BEFORE:-0}" -le 0 ]]; then
+        : > "$MESSAGES_FILE" 2>/dev/null
+        return 0
+    fi
     local tmp
     tmp=$(mktemp) || return 0
     head -n "$MSG_LINES_BEFORE" "$MESSAGES_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$MESSAGES_FILE"
