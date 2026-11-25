@@ -1198,6 +1198,7 @@ eval "$(awk '/^settings_write\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^settings_read\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^load_active_settings\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(awk '/^reload_settings_announce\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+eval "$(awk '/^persist_session_settings\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
 eval "$(grep '^CHATI_SAFETY_KEYS=' "$PROJECT_DIR/chati")"
 eval "$(grep '^chati_is_safety_key()' "$PROJECT_DIR/chati")"
 eval "$(awk '/^settings_write_defaults\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
@@ -1273,24 +1274,43 @@ test_returning_session_restores_own() {
 }
 run_test "returning to a saved session restores its settings (#60)" test_returning_session_restores_own
 
-test_switch_announces_shell_drop() {
-    # #60 follow-up: when a session change resets Shell/auto-accept OFF, the user
-    # must be TOLD — a silent drop made them think /sY was still armed after /new.
+test_switch_keeps_shell_and_autoaccept() {
+    # Once armed, Shell and auto-accept stay armed across /new, /switch and /back
+    # until the user turns them off. The state is announced, never silent, and is
+    # written into the session we land on. Other toggles still follow the session.
     BUILTIN_SETTINGS_FILE="$SANDBOX/builtin_c"
     DEFAULTS_SETTINGS_FILE="$SANDBOX/no_defaults_c"     # absent on purpose
     HISTORY_DIR="$SANDBOX/hist_c"; mkdir -p "$HISTORY_DIR"
     PREVIOUS_FILE="$SANDBOX/prev_c"
     _write_builtin_baseline
-    echo "brand_new_session" > "$PREVIOUS_FILE"          # no _settings → resets to baseline
-    AGENT_MODE=ON AGENT_AUTOACCEPT=ON                    # user had armed /sY before /new
-    # Run in THIS shell (not $(...)) so the reset actually mutates AGENT_MODE,
+    echo "brand_new_session" > "$PREVIOUS_FILE"          # no _settings yet
+    AGENT_MODE=ON AGENT_AUTOACCEPT=ON WEB_MODE=ON        # user had armed /sY before /new
+    # Run in THIS shell (not $(...)) so the reload actually mutates the toggles,
     # capturing the announcement via a file instead of a subshell.
     local out; reload_settings_announce > "$SANDBOX/announce_c" 2>&1; out=$(cat "$SANDBOX/announce_c")
-    assert_eq "$AGENT_MODE" "OFF" "shell dropped after switch" \
-        && assert_match "$out" "Shell mode is OFF" "announced the drop" \
-        && assert_match "$out" "/back" "points at /back to return to the armed session"
+    assert_eq "$AGENT_MODE" "ON" "shell stays ON after a session change" \
+        && assert_eq "$AGENT_AUTOACCEPT" "ON" "auto-accept stays ON after a session change" \
+        && assert_eq "$WEB_MODE" "OFF" "other toggles still follow the session" \
+        && assert_match "$out" "AUTO-ACCEPT is still ON" "armed auto-accept is announced" \
+        && grep -q '^AGENT_AUTOACCEPT=ON$' "$HISTORY_DIR/brand_new_session_settings" \
+        || return 1
+    # Shell ON without auto-accept: stays in verification mode, announced as such.
+    echo "another_session" > "$PREVIOUS_FILE"
+    AGENT_MODE=ON AGENT_AUTOACCEPT=OFF
+    reload_settings_announce > "$SANDBOX/announce_c2" 2>&1; out=$(cat "$SANDBOX/announce_c2")
+    assert_eq "$AGENT_MODE" "ON" "shell stays ON" \
+        && assert_eq "$AGENT_AUTOACCEPT" "OFF" "auto-accept stays OFF" \
+        && assert_match "$out" "Shell mode is still ON" "shell state announced" || return 1
+    # Both off: nothing is armed by a switch, and nothing is announced.
+    echo "sess_with_on" > "$PREVIOUS_FILE"
+    AGENT_MODE=ON AGENT_AUTOACCEPT=ON; settings_write "$HISTORY_DIR/sess_with_on_settings"
+    AGENT_MODE=OFF AGENT_AUTOACCEPT=OFF                  # user turned them off, then switched back
+    reload_settings_announce > "$SANDBOX/announce_c3" 2>&1; out=$(cat "$SANDBOX/announce_c3")
+    assert_eq "$AGENT_MODE" "OFF" "an old session cannot re-arm shell" \
+        && assert_eq "$AGENT_AUTOACCEPT" "OFF" "an old session cannot re-arm auto-accept" \
+        && assert_eq "$out" "" "nothing announced when nothing is armed"
 }
-run_test "session change announces Shell going OFF (#60)" test_switch_announces_shell_drop
+run_test "Shell and auto-accept stay as the user left them across session changes" test_switch_keeps_shell_and_autoaccept
 
 test_new_session_carries_prefs_not_safety() {
     # A /new must KEEP the preferences you had (voice, language, web, thinking,
