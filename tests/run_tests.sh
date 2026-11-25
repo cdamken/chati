@@ -394,6 +394,24 @@ test_ola_preload_has_connect_timeout() {
 }
 run_test "ola model preload bounds the TCP connect (M6)" test_ola_preload_has_connect_timeout
 
+# M6: a huge [EXEC:] output must be capped before it is fed back to the model.
+eval "$(awk '/^cap_model_output\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+test_cap_model_output() {
+    # Small output passes through untouched.
+    local small; small=$(OLA_EXEC_OUTPUT_MAX=1000 cap_model_output "hello world")
+    assert_eq "$small" "hello world" "short output is passed through verbatim" || return 1
+    # Oversized output is truncated, keeps head and tail, and announces the cut.
+    local big capped
+    big=$(head -c 5000 /dev/zero | tr '\0' 'A')
+    big="HEAD_MARKER${big}TAIL_MARKER"
+    capped=$(OLA_EXEC_OUTPUT_MAX=1000 cap_model_output "$big")
+    [[ ${#capped} -lt ${#big} ]] || { echo "oversized output was not capped" >&2; return 1; }
+    printf '%s' "$capped" | grep -q 'HEAD_MARKER' || { echo "cap must keep the head" >&2; return 1; }
+    printf '%s' "$capped" | grep -q 'TAIL_MARKER' || { echo "cap must keep the tail" >&2; return 1; }
+    printf '%s' "$capped" | grep -q 'chati truncated' || { echo "cap must mark the truncation" >&2; return 1; }
+}
+run_test "cap_model_output truncates huge [EXEC] output head+tail (M6)" test_cap_model_output
+
 test_chati_help_documents_aliases() {
     # chati's standard: full word + short alias, both shown in help.
     local out

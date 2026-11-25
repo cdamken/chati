@@ -593,6 +593,22 @@ agent_confirmed() {
     [[ "$1" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
+# Cap a command's output before it is fed back to the MODEL. A single [EXEC:]
+# can emit megabytes (`cat biglog`, `find /`), which would blow the model's
+# context window and cost and bury the actual signal. Keep the HEAD and TAIL
+# (both usually carry the useful bits) with a truncation marker in between; the
+# user already saw the full output in the terminal. Limit via OLA_EXEC_OUTPUT_MAX
+# (characters, default 100000). (M6)
+cap_model_output() {
+    local text="$1" max="${OLA_EXEC_OUTPUT_MAX:-100000}" len=${#1}
+    if (( len <= max )); then printf '%s' "$text"; return 0; fi
+    local keep=$(( max / 2 ))
+    printf '%s\n\n[... chati truncated %d of %d characters here to protect the model context; the full output was shown to the user ...]\n\n%s' \
+        "$(printf '%s' "$text" | head -c "$keep")" \
+        "$(( len - max ))" "$len" \
+        "$(printf '%s' "$text" | tail -c "$keep")"
+}
+
 # Decide whether an agent command is a clearly READ-ONLY operation (search /
 # show / list) that can run WITHOUT the Execute? prompt. Deny-by-default:
 # return 0 (safe) ONLY for a known read-only command with no shell composition;
@@ -2216,10 +2232,14 @@ while true; do
                     echo "$agent_output"
                     echo "(exit=$agent_exit)"
                 fi
+                # Cap what goes back to the MODEL (not what the user saw above): a
+                # command like `cat biglog` or `find /` can emit megabytes, which
+                # would blow the model's context and cost and bury the signal (M6).
+                agent_output_model="$(cap_model_output "$agent_output")"
                 msg="[COMMAND]: $agent_cmd
 [EXIT]: $agent_exit
 [OUTPUT]:
-${agent_output:-(no output)}
+${agent_output_model:-(no output)}
 
 Interpret the exit code: 0 means the command succeeded; non-zero means it failed and OUTPUT (if any) is the error message. Do NOT claim success when exit is non-zero."
             else
