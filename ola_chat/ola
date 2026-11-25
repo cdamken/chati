@@ -172,6 +172,7 @@ printf "🤔 " >&2
 # the stream. When the model is already loaded it returns instantly, so a warm
 # turn pays almost nothing. Best-effort — on failure we still try to stream.
 curl -s --max-time "${OLA_LOAD_TIMEOUT:-900}" \
+    --connect-timeout "${OLA_CONNECT_TIMEOUT:-10}" \
     -X POST "$OLLAMA_API/api/generate" \
     -H "Content-Type: application/json" \
     -d "$(jq -nc --arg m "$OLLAMA_MODEL" '{model:$m}')" \

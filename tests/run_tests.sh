@@ -380,6 +380,20 @@ test_ola_argmax_safe() {
 }
 run_test "ola/chati route big messages via file, not argv (ARG_MAX)" test_ola_argmax_safe
 
+# M6: the model-preload POST allows a long --max-time (a cold load of a big model
+# can take minutes) but must bound the TCP connect, or an unreachable REMOTE
+# endpoint would hang the whole turn up to that full timeout before failing.
+test_ola_preload_has_connect_timeout() {
+    # The preload is the only curl using OLA_LOAD_TIMEOUT; it must also bound the
+    # connect (OLA_CONNECT_TIMEOUT) so an unreachable remote fails fast instead of
+    # hanging up to the full load timeout.
+    grep -q 'OLA_LOAD_TIMEOUT' "$PROJECT_DIR/ola_chat/ola" \
+        || { echo "ola preload (OLA_LOAD_TIMEOUT) not found" >&2; return 1; }
+    grep -q 'connect-timeout "${OLA_CONNECT_TIMEOUT' "$PROJECT_DIR/ola_chat/ola" \
+        || { echo "ola preload must bound the connect so an unreachable remote fails fast (M6)" >&2; return 1; }
+}
+run_test "ola model preload bounds the TCP connect (M6)" test_ola_preload_has_connect_timeout
+
 test_chati_help_documents_aliases() {
     # chati's standard: full word + short alias, both shown in help.
     local out
