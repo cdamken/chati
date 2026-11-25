@@ -2277,6 +2277,23 @@ else
 fi
 
 #==============================================================================
+# PHASE 5: docr suite (delegated) — one command covers both suites (T3)
+#==============================================================================
+if [[ -x "$PROJECT_DIR/docr/test_docr.sh" ]]; then
+    echo ""
+    echo "── PHASE 5: docr suite (docr/test_docr.sh) ──"
+    if docr_out=$(bash "$PROJECT_DIR/docr/test_docr.sh" 2>&1); then
+        echo "  ✓ $(printf '%s' "$docr_out" | grep -E 'docr tests:' | tail -1)"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        echo "  ✗ docr suite failed:"
+        printf '%s\n' "$docr_out" | sed 's/^/      /'
+        TESTS_FAILED=$((TESTS_FAILED+1))
+        FAIL_REASONS+=("docr suite (docr/test_docr.sh)")
+    fi
+fi
+
+#==============================================================================
 # Results
 #==============================================================================
 echo ""
