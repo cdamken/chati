@@ -250,6 +250,20 @@ test_update_applies_setup() {
 }
 run_test "chati --update applies setup, idempotently (#70 follow-up)" test_update_applies_setup
 
+test_no_retired_ailocal_hints() {
+    cd "$PROJECT_DIR" || return 1
+    # 'ailocal' is the pre-1.36 name and is gone. It may only appear in setup.sh's
+    # cleanup of old symlinks, never as a hint printed to the user.
+    local hits
+    hits=$(grep -rnE 'ailocal (start|awake|stop)' "$PROJECT_DIR/chati" "$PROJECT_DIR/ola_chat" "$PROJECT_DIR/lib_chat.sh" 2>/dev/null)
+    if [[ -n "$hits" ]]; then
+        echo "retired 'ailocal <cmd>' hint still shown to users:" >&2
+        printf '%s\n' "$hits" >&2
+        return 1
+    fi
+}
+run_test "no retired 'ailocal <cmd>' hints in user messages" test_no_retired_ailocal_hints
+
 test_ollama_proc_pattern() {
     # The process-match pattern must catch ollama at a path/word boundary
     # but NOT a lookalike like "myollama serve". Eval the real value from

@@ -199,7 +199,7 @@ if ! curl -sS --no-buffer --max-time "${OLA_CURL_TIMEOUT:-600}" \
     log_chat "ola: streaming failed (model=$OLLAMA_MODEL)"
     rollback_user_turn
     error_exit "No response from '$OLLAMA_MODEL' (timeout, stall, or a non-JSON error)." \
-        "A big model (e.g. gemma4:31b) may be cold-loading, or the Mac may be low on memory or asleep. Try a smaller model with /model, keep it awake with 'ailocal awake on', and check Ollama at $OLLAMA_API."
+        "A big model (e.g. gemma4:31b) may be cold-loading, or the machine may be low on memory or asleep. Try a smaller model with /model, and check Ollama at $OLLAMA_API."
 fi
 
 # Trailing newline so the next prompt starts on a fresh line.
