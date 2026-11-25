@@ -293,8 +293,8 @@ test_upgrade_release_pins_tag() {
     # out v$latest, and must NOT `git pull` the branch tip.
     printf '%s' "$body" | grep -q 'fetch --quiet --tags origin' \
         || { echo "release upgrade must fetch tags" >&2; return 1; }
-    printf '%s' "$body" | grep -q 'checkout --quiet --detach "v$latest"' \
-        || { echo "release upgrade must check out the release tag v\$latest" >&2; return 1; }
+    printf '%s' "$body" | grep -q 'merge --ff-only --quiet "v$latest"' \
+        || { echo "release upgrade must fast-forward to the release tag v\$latest" >&2; return 1; }
     if printf '%s' "$body" | grep -qE 'pull --ff-only'; then
         echo "release upgrade must not pull the branch tip (runs unreleased code as root)" >&2
         return 1
