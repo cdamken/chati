@@ -28,8 +28,19 @@ fi
 
 chati_load_env
 
-# --- Ollama (auto-starts with chati) ---
-if chati_svc_running "$CHATI_OLLAMA_PROC"; then
+# --- Ollama (a LOCAL one auto-starts with chati; a remote one does not) ---
+if chati_ollama_is_remote; then
+    # Remote endpoint: a local process check is meaningless; report reachability.
+    api="$(chati_ollama_api)"
+    ver=$(curl -fsS --max-time 2 "$api/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
+    if [ -n "$ver" ]; then
+        echo "Ollama:    REACHABLE  (remote $api, v$ver)"
+    elif curl -fsS --max-time 2 "$api/api/version" >/dev/null 2>&1; then
+        echo "Ollama:    REACHABLE  (remote $api)"
+    else
+        echo "Ollama:    unreachable  (remote $api — switch with /host, or /host local)"
+    fi
+elif chati_svc_running "$CHATI_OLLAMA_PROC"; then
     ver=$(curl -fsS --max-time 2 "$(chati_ollama_api)/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
     echo "Ollama:    RUNNING${ver:+  (v$ver)}"
 else

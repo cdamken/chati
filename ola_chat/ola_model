@@ -28,15 +28,14 @@ EOF
 check_ollama() {
     if ! ollama list >/dev/null 2>&1; then
         # Tailor the message: a local endpoint means "start Ollama"; a remote one
-        # (via /host or /ollama) means the OTHER machine is asleep/unexposed, not
-        # that you need to start something here (#55).
-        local ep="${OLLAMA_API:-${OLLAMA_HOST:-localhost:11434}}"
-        case "$ep" in
-            *localhost*|*127.0.0.1*|*0.0.0.0*|"")
-                error_exit "Ollama isn't running here. Start it with: ollama serve  (or restart chati to auto-start it)" ;;
-            *)
-                error_exit "Can't reach the Ollama endpoint at $ep. Is that machine awake and Ollama exposed there? Use /ollama to pick another server, or /host local to go back to this Mac." ;;
-        esac
+        # (switched with /host) means the OTHER machine is asleep/unexposed, not that
+        # you need to start something here (#55). ollama_is_remote is the shared
+        # check so every message agrees (M4).
+        if ollama_is_remote; then
+            error_exit "Can't reach the Ollama endpoint at ${OLLAMA_API:-$OLLAMA_HOST}. Is that machine awake and Ollama exposed there? Use /host to pick another server, or /host local to go back to this machine."
+        else
+            error_exit "Ollama isn't running here. Start it with: ollama serve  (or restart chati to auto-start it)"
+        fi
     fi
 }
 

@@ -63,7 +63,11 @@ fi
 # where the daemon dies mid-session, not only at chati startup.
 if ! ollama_running; then
     log_chat "ola: ollama not reachable at $OLLAMA_API"
-    error_exit "Ollama is not running at $OLLAMA_API. Run: ollama serve  (or restart chati to auto-start it)"
+    if ollama_is_remote; then
+        error_exit "Can't reach the remote Ollama at $OLLAMA_API. Make sure that machine is awake and Ollama is exposed there, or run /host local to use this machine."
+    else
+        error_exit "Ollama is not running at $OLLAMA_API. Run: ollama serve  (or restart chati to auto-start it)"
+    fi
 fi
 
 # Append user turn as JSONL. Ensure the session dir exists first (a fresh
@@ -226,7 +230,11 @@ if [[ ! -s "$LAST_RESPONSE_FILE" ]]; then
             '.models[] | select((.name == $m)
                 or (.name == $m + ":latest")
                 or ((.name | sub(":latest$";"")) == $m))' >/dev/null 2>&1; then
-        error_exit "Model '$OLLAMA_MODEL' is not installed. Run: ollama pull $OLLAMA_MODEL"
+        if ollama_is_remote; then
+            error_exit "Model '$OLLAMA_MODEL' isn't available on the remote Ollama ($OLLAMA_API). Install it on that machine (ollama pull $OLLAMA_MODEL there), or run /host local and pull it here."
+        else
+            error_exit "Model '$OLLAMA_MODEL' is not installed. Run: ollama pull $OLLAMA_MODEL"
+        fi
     fi
     error_exit "Empty response from $OLLAMA_MODEL. The model may be overloaded or misconfigured."
 fi

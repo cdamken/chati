@@ -1050,6 +1050,32 @@ test_resolve_ollama_api() {
 }
 run_test "resolve_ollama_api derives the endpoint from OLLAMA_HOST" test_resolve_ollama_api
 
+# --- ollama_is_remote: one shared local/remote check for user-facing hints (M4) ---
+test_ollama_is_remote() {
+    local sh="source '$PROJECT_DIR/lib_chat.sh' 2>/dev/null"
+    local ep
+    for ep in "http://localhost:11434" "http://127.0.0.1:11434" "http://[::1]:11434" ""; do
+        if env OLLAMA_API="$ep" OLLAMA_HOST="" bash -c "$sh; ollama_is_remote"; then
+            echo "ollama_is_remote wrongly flagged local '$ep' as remote" >&2; return 1
+        fi
+    done
+    for ep in "http://snoopy6:11434" "http://100.64.0.1:11434" "https://box:443"; do
+        if ! env OLLAMA_API="$ep" OLLAMA_HOST="" bash -c "$sh; ollama_is_remote"; then
+            echo "ollama_is_remote missed remote '$ep'" >&2; return 1
+        fi
+    done
+    # The chat paths must branch their "run ollama serve / ollama pull" hints on it,
+    # so a remote user isn't told to start or pull on the wrong machine.
+    grep -q 'ollama_is_remote' "$PROJECT_DIR/ola_chat/ola" \
+        && grep -q 'ollama_is_remote' "$PROJECT_DIR/ola_chat/ola_model" \
+        || { echo "ola/ola_model must tailor their hints via ollama_is_remote" >&2; return 1; }
+    # And the dead "/ollama" command reference must be gone from those hints.
+    if grep -q 'Use /ollama' "$PROJECT_DIR/ola_chat/ola_model"; then
+        echo "ola_model still points at the nonexistent /ollama command" >&2; return 1
+    fi
+}
+run_test "ollama_is_remote classifies local vs remote endpoints (M4)" test_ollama_is_remote
+
 # --- OLLAMA_HOST mirrors the resolved OLLAMA_API (/models vs chat divergence) ---
 test_ollama_host_mirrors_api() {
     # Regression: a child (ola_model behind /models, ola, mola) inherits a

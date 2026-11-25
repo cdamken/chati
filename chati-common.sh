@@ -75,6 +75,19 @@ chati_ollama_api() {
     printf '%s' "http://localhost:11434"
 }
 
+# True (0) when the active Ollama endpoint is on ANOTHER machine. status/doctor use
+# it so they don't claim a REMOTE Ollama "starts on its own when you launch chati"
+# (chati only auto-starts a LOCAL one). Mirrors ollama_is_remote in lib_chat.sh,
+# which doctor/status don't source (M4).
+chati_ollama_is_remote() {
+    # IPv6 literals quoted so brackets match literally, not as a glob char class.
+    case "$(chati_ollama_api)" in
+        http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|'http://[::1]'|'http://[::1]:'*) return 1 ;;
+        https://localhost|https://localhost:*|https://127.0.0.1|https://127.0.0.1:*|'https://[::1]'|'https://[::1]:'*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # --- Local service lifecycle (powers `chati --status` and `chati --stop`) ---------
 # chati keeps the local AI services simple: Ollama starts on demand when you
 # launch chati, SearXNG starts on demand when you use /web, and OpenWebUI is the

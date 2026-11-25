@@ -156,6 +156,21 @@ case "$_orig_ollama_host" in
 esac
 unset _orig_ollama_host
 
+# True (0) when the active Ollama endpoint is on ANOTHER machine. User-facing hints
+# differ sharply by location: on a local endpoint "run ollama serve" / "ollama pull
+# X" are right; against a REMOTE one they are wrong or misleading (serve starts a
+# server HERE, and a pull lands on the far box, not where the user is). One helper
+# so every message makes the same call instead of four ad-hoc checks (M4).
+ollama_is_remote() {
+    # IPv6 literals are quoted so the brackets are matched literally, not as a glob
+    # character class.
+    case "${OLLAMA_API:-}" in
+        ""|http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|'http://[::1]'|'http://[::1]:'*) return 1 ;;
+        https://localhost|https://localhost:*|https://127.0.0.1|https://127.0.0.1:*|'https://[::1]'|'https://[::1]:'*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # Print reachable Ollama endpoints as "URL<TAB>version", one per line: localhost
 # plus online Tailscale peers on :11434. Powers the `/ollama` discovery picker.
 discover_ollama_endpoints() {
