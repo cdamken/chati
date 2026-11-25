@@ -7,6 +7,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.0] - 2026-11-25
+
+Fixes from a full code review of chati and its Linux sibling, plus an upgrade
+that installs the release it announces.
+
+### Changed
+- **`chati --upgrade` installs the release tag.** It used to `git pull` the tip
+  of the branch once a newer release existed, so commits pushed after the tag
+  were installed too. It now fetches tags and fast-forwards to `v<latest>`,
+  staying on the branch you were on.
+- **`chati --upgrade` refuses to drop your commits.** If the checkout has
+  commits that are not in the release tag, it stops and lists them instead of
+  moving past them.
+- **`chati --upgrade` no longer re-pulls models** unless you pass `--model`.
+- **`/new` keeps your preferences;** only Shell mode and auto-accept reset.
+
+### Fixed
+- **`/models` said "Ollama is not running" while chat worked.** Child processes
+  re-read `.env` and pointed the `ollama` CLI back at the configured host after
+  a fallback to local. `OLLAMA_HOST` now follows the resolved `OLLAMA_API`; a
+  bind-all `0.0.0.0` / `[::]` is left as is for `ollama serve`.
+- **`chati --doctor` and `--status` probed localhost** when `.env` only set
+  `OLLAMA_HOST`. They now derive the endpoint the same way the chat does.
+- **A failed turn reused the previous answer.** With Shell mode and `/sY` that
+  re-ran the last command in a loop when Ollama went away mid-session.
+- **A `*` or `?` in a normal message was expanded against the current folder,**
+  which could send unrelated files to OCR.
+- **Conversations were only saved on `/bye`.** Ctrl-D and closing the window
+  now save too.
+- **Ctrl-C during web research or OCR** now cancels the turn instead of calling
+  the model anyway.
+- **`/url` always waited the full timeout,** even when the page loaded at once.
+- **`/voice <name>`** is honored; **`/host forget <ip>`** works with an address.
+- **The Shell-mode prompt went stale** on `/file`, `/url`, `/ocr` and `/batch`.
+- **Rollback of a failed first message** failed on macOS (`head -n 0`).
+- **`setup.sh --model X`** wrote the active model to a file nothing reads.
+- **`setup.sh --remove-all`** could delete models on a remote Ollama; it now
+  always targets localhost.
+- **Auto-renamed sessions** ending in `_summary`, `_prompt` or `_settings`
+  disappeared from the list.
+- **A killed background compaction** left a lock that blocked compaction for
+  that session for good. The lock now records its PID.
+- **Falling back to a local model** could pick an embedding model.
+- **prettify** no longer mangles `_digit` in filenames, versions and identifiers.
+- Error messages no longer point to the retired `ailocal` command.
+
 ## [1.37.0] - 2026-10-22
 
 Commands are dashed again. A command carries a `--`; a bare word is reserved
