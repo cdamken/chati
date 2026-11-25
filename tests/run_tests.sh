@@ -1551,6 +1551,20 @@ test_agent_prompt_plans_multipart() {
 }
 run_test "agent_capability_prompt tells the agent to plan multi-part tasks" test_agent_prompt_plans_multipart
 
+# --- #17: agent prompt is synced in send_and_capture, not just the main loop ---
+# ola injects OLA_EXTRA_SYSTEM as a role:system message; it must reflect /a for
+# every send path (/file, /url, /ocr, /batch), so the sync lives in the one
+# choke point, not only in the interactive loop.
+test_agent_prompt_synced_in_send_and_capture() {
+    local body
+    body=$(awk '/^send_and_capture\(\) \{/,/^}$/' "$PROJECT_DIR/chati")
+    assert_match "$body" "OLA_EXTRA_SYSTEM" \
+        "send_and_capture syncs OLA_EXTRA_SYSTEM for every caller" \
+        && assert_match "$body" "agent_capability_prompt" \
+        "send_and_capture computes the agent prompt from AGENT_MODE"
+}
+run_test "agent prompt sync lives in send_and_capture (#17)" test_agent_prompt_synced_in_send_and_capture
+
 # --- ola_stream_thinking (reasoning channel render for /think) ---
 test_ola_stream_thinking_shows_reasoning() {
     local out

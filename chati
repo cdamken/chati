@@ -627,6 +627,15 @@ send_and_capture() {
     local OLA_THINK=0
     [[ "$THINK_MODE" == "ON" ]] && OLA_THINK=1
     export OLA_THINK
+    # Keep the agent capability instruction in sync with /a for EVERY send path
+    # (plain message, /file, /url, /ocr, /batch), not just the main one. ola's
+    # payload builder injects OLA_EXTRA_SYSTEM as a role:system message; setting it
+    # only in the main loop left the other paths on a stale value.
+    if [[ "$AGENT_MODE" == "ON" ]]; then
+        export OLA_EXTRA_SYSTEM; OLA_EXTRA_SYSTEM=$(agent_capability_prompt)
+    else
+        unset OLA_EXTRA_SYSTEM
+    fi
     # Pass the message through a temp file, not argv. An OCR-of-many-files
     # message can be megabytes and blow past ARG_MAX ("Argument list too
     # long") if handed to ola as a command-line argument. ola reads
@@ -2088,16 +2097,8 @@ while true; do
     # drop back to the prompt, not go on to query the model with partial notes.
     if (( ${_chati_interrupted:-0} )); then echo; continue; fi
 
-    # Sync the agent capability instruction with the current /a toggle.
-    # When ON, ola's payload builder reads OLA_EXTRA_SYSTEM and adds it
-    # as a real role:system message just before the user turn (see
-    # agent_capability_prompt for the full text and rationale).
-    if [[ "$AGENT_MODE" == "ON" ]]; then
-        export OLA_EXTRA_SYSTEM
-        OLA_EXTRA_SYSTEM=$(agent_capability_prompt)
-    else
-        unset OLA_EXTRA_SYSTEM
-    fi
+    # (The agent capability instruction is kept in sync inside send_and_capture
+    # now, so every send path — plain, /file, /url, /ocr, /batch — matches /a.)
 
     # Auto-fallback: if we're pointed at a REMOTE Ollama that just went away
     # (asleep, off the network), drop back to localhost so you're not stuck.
