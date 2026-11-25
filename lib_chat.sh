@@ -133,6 +133,16 @@ resolve_ollama_api() {
     printf 'http://localhost:11434\n'
 }
 export OLLAMA_API="$(resolve_ollama_api "${OLLAMA_API:-}" "${OLLAMA_HOST:-}")"
+# Keep OLLAMA_HOST (what the `ollama` CLI reads) in lock-step with the resolved
+# OLLAMA_API (what the chat's curl uses). Otherwise they can diverge: when the
+# parent falls back to local Ollama it exports OLLAMA_API=localhost, but a child
+# that re-sources .env (ola_model behind /models, ola, mola) re-reads the
+# configured OLLAMA_HOST (e.g. an unreachable remote), so the chat works via
+# OLLAMA_API while `/models` shells out to `ollama` against the dead host and
+# says "not running". Derive HOST from the final API so both always agree. For an
+# http:// endpoint this yields host:port; an https:// URL is kept whole (the CLI
+# accepts it).
+export OLLAMA_HOST="${OLLAMA_API#http://}"
 
 # Print reachable Ollama endpoints as "URL<TAB>version", one per line: localhost
 # plus online Tailscale peers on :11434. Powers the `/ollama` discovery picker.

@@ -998,6 +998,23 @@ test_resolve_ollama_api() {
 }
 run_test "resolve_ollama_api derives the endpoint from OLLAMA_HOST" test_resolve_ollama_api
 
+# --- OLLAMA_HOST mirrors the resolved OLLAMA_API (/models vs chat divergence) ---
+test_ollama_host_mirrors_api() {
+    # Regression: a child (ola_model behind /models, ola, mola) inherits a
+    # fallback OLLAMA_API=localhost but re-reads a stale OLLAMA_HOST (e.g. an
+    # unreachable remote from .env). HOST must end up matching API, or the chat
+    # works (curl/OLLAMA_API) while /models shells out to `ollama` (OLLAMA_HOST)
+    # against the dead host and says "not running".
+    local h
+    h=$(env OLLAMA_API="http://localhost:11434" OLLAMA_HOST="deadremote:11434" \
+        bash -c "source '$PROJECT_DIR/lib_chat.sh' 2>/dev/null; printf '%s' \"\$OLLAMA_HOST\"")
+    assert_eq "$h" "localhost:11434" "OLLAMA_HOST follows the resolved OLLAMA_API" || return 1
+    h=$(env OLLAMA_API="https://box:11434" OLLAMA_HOST="other:1" \
+        bash -c "source '$PROJECT_DIR/lib_chat.sh' 2>/dev/null; printf '%s' \"\$OLLAMA_HOST\"")
+    assert_eq "$h" "https://box:11434" "https endpoint keeps its scheme in OLLAMA_HOST"
+}
+run_test "OLLAMA_HOST stays in lock-step with OLLAMA_API" test_ollama_host_mirrors_api
+
 # --- per-terminal model with global fallback (#37 part 2) ---
 test_active_model_two_tier() {
     local gi="$SANDBOX/gm.txt" pi="$SANDBOX/pi.txt"
