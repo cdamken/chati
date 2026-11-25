@@ -1138,7 +1138,7 @@ test_ollama_is_remote() {
             echo "ollama_is_remote wrongly flagged local '$ep' as remote" >&2; return 1
         fi
     done
-    for ep in "http://snoopy6:11434" "http://100.64.0.1:11434" "https://box:443"; do
+    for ep in "http://remotebox:11434" "http://100.64.0.1:11434" "https://box:443"; do
         if ! env OLLAMA_API="$ep" OLLAMA_HOST="" bash -c "$sh; ollama_is_remote"; then
             echo "ollama_is_remote missed remote '$ep'" >&2; return 1
         fi

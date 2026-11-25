@@ -345,7 +345,8 @@ settings_write() {
 }
 # Like settings_write, but skips the safety toggles — used for the GLOBAL
 # defaults so a saved default can never silently arm shell/auto-accept in a new
-# session (#60). Session files still use settings_write (safety is per-session).
+# session (#60). Session files still use settings_write, and the live toggles stay
+# armed across session changes (see reload_settings_announce).
 settings_write_defaults() {
     local f="$1" k; [[ -z "$f" ]] && return 0
     mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
