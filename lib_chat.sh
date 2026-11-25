@@ -722,6 +722,10 @@ count_lang_matches() {
 # (score < 2) falls back to Samantha (English).
 get_voice() {
     local text="$*"
+    # A voice pinned with /voice <name> wins over language auto-detection;
+    # AUTO (the default) falls through to the detection below. Without this,
+    # /voice <name> set DEFAULT_VOICE but get_voice ignored it, so it did nothing.
+    [[ -n "${DEFAULT_VOICE:-}" && "$DEFAULT_VOICE" != "AUTO" ]] && { echo "$DEFAULT_VOICE"; return 0; }
     [[ -z "$text" ]] && { echo "Samantha"; return 0; }
 
     # Script detection via UTF-8 lead bytes (LC_ALL=C). Bash 3.2's =~

@@ -402,6 +402,10 @@ carry_prefs_apply() {
 
 # Clean-exit handler: flush command history AND the current session's settings.
 chati_on_exit() {
+    # Save the live conversation to its session file on ANY exit, not just /bye.
+    # Ctrl-D (EOF breaks the loop) and a terminal close both land here; without
+    # this they lost everything said since the last explicit save.
+    "$MOLA_CMD" save >/dev/null 2>&1 || true
     history -w "$HISTFILE" 2>/dev/null
     persist_session_settings 2>/dev/null
 }
@@ -1205,12 +1209,14 @@ msg_is_just_paths() {
     local msg="$1"; shift
     local sentinel=$'\x01' tok raw t p rest="$msg"
     local protected="${msg//\\ /$sentinel}"
+    local _ng=1; [[ -o noglob ]] || _ng=0; set -f   # split, never filename-glob
     for tok in $protected; do
         raw="${tok//$sentinel/ }"
         t="$raw"; t="${t#\"}"; t="${t%\"}"; t="${t#\'}"; t="${t%\'}"; t="${t%[.,;:]}"
         p=$(expand_path "$t")
         [[ -e "$p" ]] && rest="${rest//$raw/}"
     done
+    (( _ng )) || set +f
     rest=$(printf '%s' "$rest" | tr -d '[:space:][:punct:]')
     [[ ${#rest} -lt 3 ]]
 }
@@ -1871,7 +1877,10 @@ while true; do
                     echo "   Set default: /host <n|name|local>   ·   This session only: /host <n|name> session   ·   Forget: /host forget <n|name>"
                 elif [[ "$h_sub" == forget ]]; then
                     h_f="$h_rest"
-                    [[ "$h_f" == [0-9]* ]] && h_f=$(ollama_endpoints_status | sed -n "${h_f}p" | cut -f1)
+                    # Only a PURE number is a list index; "192.168.1.50:11434"
+                    # starts with a digit but is a host, not an index (sed would
+                    # choke on it and the forget would silently fail).
+                    [[ "$h_f" =~ ^[0-9]+$ ]] && h_f=$(ollama_endpoints_status | sed -n "${h_f}p" | cut -f1)
                     h_f="${h_f#http://}"; h_f="${h_f#https://}"
                     if [[ -n "$h_f" ]]; then forget_ollama_host "$h_f"; echo "🗑️  Forgot $h_f"; else echo "Usage: /host forget <number|host>"; fi
                 else

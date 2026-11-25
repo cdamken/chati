@@ -574,8 +574,12 @@ else
         ollama pull "$CHAT_MODEL"
         ok "Pulled '$CHAT_MODEL'"
     fi
-    # Point chati at a model we know exists (only if unset or stale).
-    active_file="$REPO_ROOT/.active_ollama_model.txt"
+    # Point chati at a model we know exists (only if unset or stale). This must be
+    # the GLOBAL model file chati actually reads — $CHATI_DATA_HOME, not the repo
+    # dir (data moved out of the checkout in 1.10). Writing it under $REPO_ROOT
+    # made `setup.sh --model X` print "Set active model" while changing nothing.
+    active_file="${CHATI_DATA_HOME:-$HOME/.local/share/chati}/.active_ollama_model.txt"
+    mkdir -p "$(dirname "$active_file")" 2>/dev/null
     current="$(cat "$active_file" 2>/dev/null || true)"
     if ! installed_models | grep -qxF "$current"; then
         printf '%s\n' "$CHAT_MODEL" > "$active_file"

@@ -47,7 +47,11 @@ fetch_url() {
     out_file=$(mktemp)
     "$lynx_bin" -dump -nolist -display_charset=utf-8 "$url" >"$out_file" 2>/dev/null &
     local pid=$!
-    ( sleep "$timeout"; kill "$pid" 2>/dev/null ) &
+    # Redirect the watchdog's stdio: inside $(fetch_url …) it would otherwise
+    # inherit the command-substitution pipe, and its `sleep` keeps that pipe open
+    # for the FULL timeout even after lynx finishes — so a fast fetch still blocked
+    # the whole $timeout. lynx already writes to $out_file, not stdout.
+    ( sleep "$timeout"; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 &
     local watchdog=$!
     local rc=0
     wait "$pid" 2>/dev/null || rc=$?

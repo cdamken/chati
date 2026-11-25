@@ -323,6 +323,12 @@ compress_memory() {
 
     # Best-effort lock so two background jobs don't clobber the same summary.
     local lock="$HISTORY_DIR/${sess_name}_summary.lock"
+    # chati runs compaction in the background; if that job is killed, the mkdir
+    # lock is left behind and would block ALL future compaction for this session.
+    # Clear a lock older than 2 minutes (compaction is far quicker) as stale.
+    if [[ -d "$lock" && -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]]; then
+        rmdir "$lock" 2>/dev/null
+    fi
     if ! mkdir "$lock" 2>/dev/null; then
         log_chat "compress: skipping '$sess_name' (lock held)"
         return 0
