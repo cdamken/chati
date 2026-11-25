@@ -7,6 +7,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.3] - 2026-11-25
+
+### Fixed
+- **A 403 from Ollama is named as such.** An Ollama bound to loopback rejects a
+  Host header that is not an IP, `localhost` or the machine's short hostname,
+  for example a full `*.ts.net` name reached through `tailscale serve`. chati
+  used to report this as "unreachable", as a timeout or as a missing model.
+  `chati --status` and the chat path now say it is a 403 and suggest the short
+  host name or the Tailscale IP.
+
+### Changed
+- Tests: a guard that fails when `VERSION` and `CHATI_VERSION` differ, and one
+  that checks the helper-model pickers fall back to the chat model, never to an
+  embedding model, on a box with only a chat model and an embedder.
+
 ## [1.38.2] - 2026-11-25
 
 ### Changed
