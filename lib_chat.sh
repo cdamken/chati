@@ -171,6 +171,22 @@ ollama_is_remote() {
     esac
 }
 
+# If the active Ollama endpoint answers 403, it is rejecting our Host header: a
+# loopback-bound Ollama (the default) only accepts a Host of an IP, "localhost",
+# or the machine's SHORT hostname, so reaching a Tailscale box by its full
+# MagicDNS name (host.tailnet.ts.net) gets a 403. On the chat path that 403
+# otherwise surfaces as a vague stream failure (pipefail on the non-JSON body) or
+# a bogus "model not installed", so callers probe here first and exit with the
+# real fix. No-op (returns 0) for any other status, so normal failures fall
+# through to the caller's own handling.
+ollama_exit_if_forbidden() {
+    local code
+    code=$(curl -s -o /dev/null --max-time 3 -w '%{http_code}' "$OLLAMA_API/api/version" 2>/dev/null)
+    [[ "$code" == "403" ]] || return 0
+    error_exit "Ollama at $OLLAMA_API answered 403: it rejected the Host header." \
+        "A loopback-bound Ollama only accepts an IP, localhost, or the machine's short hostname. Point at the short name or the 100.x Tailscale IP, not the full *.ts.net name (set OLLAMA_HOST in .env, or switch with /host)."
+}
+
 # Print reachable Ollama endpoints as "URL<TAB>version", one per line: localhost
 # plus online Tailscale peers on :11434. Powers the `/ollama` discovery picker.
 discover_ollama_endpoints() {

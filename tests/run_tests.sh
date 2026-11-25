@@ -1185,6 +1185,39 @@ test_chati_ollama_probe_classifies_403() {
 }
 run_test "chati_ollama_probe distinguishes 403 from unreachable" test_chati_ollama_probe_classifies_403
 
+# --- ollama_exit_if_forbidden: chat path turns a 403 into the real fix ---
+# On the send path a 403 (loopback Ollama rejecting a full *.ts.net Host header)
+# surfaces as a vague stream failure or a bogus "model not installed". The helper
+# must catch the 403 and exit with the short-name/IP hint, and be a no-op on 2xx.
+test_ollama_exit_if_forbidden() {
+    local fn; fn=$(awk '/^ollama_exit_if_forbidden\(\) \{/,/^}$/' "$PROJECT_DIR/lib_chat.sh")
+    local out rc
+    out=$(OLLAMA_API="http://box:11434" bash -c '
+        curl() { printf "403"; }
+        error_exit() { echo "Error: $*" >&2; exit 1; }
+        '"$fn"'
+        ollama_exit_if_forbidden
+        echo "REACHED_PAST"' 2>&1); rc=$?
+    assert_eq "$rc" "1" "403 must exit non-zero" || return 1
+    assert_match "$out" "403" "names the 403" || return 1
+    assert_match "$out" "short hostname" "hints the short hostname/IP" || return 1
+    if printf '%s' "$out" | grep -q "REACHED_PAST"; then
+        echo "ollama_exit_if_forbidden must NOT fall through on a 403" >&2; return 1
+    fi
+    out=$(OLLAMA_API="http://box:11434" bash -c '
+        curl() { printf "200"; }
+        error_exit() { echo "Error: $*" >&2; exit 1; }
+        '"$fn"'
+        ollama_exit_if_forbidden
+        echo "REACHED_PAST"' 2>&1); rc=$?
+    assert_eq "$rc" "0" "non-403 returns 0" || return 1
+    assert_match "$out" "REACHED_PAST" "non-403 falls through to the caller" || return 1
+    # Both ola failure branches must call it, so neither misdiagnoses a 403.
+    [[ $(grep -c 'ollama_exit_if_forbidden' "$PROJECT_DIR/ola_chat/ola") -ge 2 ]] \
+        || { echo "ola must call ollama_exit_if_forbidden in both failure branches" >&2; return 1; }
+}
+run_test "ollama_exit_if_forbidden exits with the Host-header hint on 403" test_ollama_exit_if_forbidden
+
 # --- OLLAMA_HOST mirrors the resolved OLLAMA_API (/models vs chat divergence) ---
 test_ollama_host_mirrors_api() {
     # Regression: a child (ola_model behind /models, ola, mola) inherits a
