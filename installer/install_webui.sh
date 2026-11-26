@@ -238,6 +238,12 @@ upgrade_webui() {
     else
         log "OpenWebUI installed/upgraded: ${before:-none} → ${after:-unknown}"
         log "If anything misbehaves: 'install_webui.sh restore' brings back the pre-upgrade state."
+        # An upgrade from an existing version changes the web app the browser
+        # has cached (older releases registered a service worker), so the old
+        # interface can keep showing until the site data is cleared.
+        if [[ -n "$before" ]]; then
+            log "If the browser still shows the old interface: hard-reload the page, or clear this site's data (cache and service worker) and reload."
+        fi
     fi
     return 0
 }

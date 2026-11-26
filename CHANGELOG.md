@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.8] - 2026-11-26
+
+### Changed
+- After OpenWebUI is upgraded from an existing version, the installer says how
+  to get rid of a stale interface in the browser (hard reload, or clear the
+  site's cache and service worker).
+
 ## [1.38.7] - 2026-11-26
 
 ### Fixed
