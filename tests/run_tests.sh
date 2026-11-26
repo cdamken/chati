@@ -300,25 +300,59 @@ run_test "save-on-exit rides the EXIT trap, no HUP/TERM traps (#8/R2)" test_save
 # U1: release-mode upgrade installs the release TAG, not origin/main's tip —
 # otherwise commits pushed after the tag run (as root, on a system install).
 test_upgrade_release_pins_tag() {
+    # Functional, against a throwaway origin: the REAL chati_self_update must land
+    # on the release tag (not main's unreleased tip), stay on the branch, survive
+    # an unrelated local tag that differs from the remote one, and refuse to move
+    # past local commits.
     cd "$PROJECT_DIR" || return 1
-    local f="$PROJECT_DIR/chati" body
-    body=$(awk '/^chati_self_update\(\) \{/,/^}$/' "$f")
-    # Release branch (the else of the track_ref test) must fetch tags and check
-    # out v$latest, and must NOT `git pull` the branch tip.
-    printf '%s' "$body" | grep -q 'fetch --quiet --tags origin' \
-        || { echo "release upgrade must fetch tags" >&2; return 1; }
-    printf '%s' "$body" | grep -q 'merge --ff-only --quiet "v$latest"' \
-        || { echo "release upgrade must fast-forward to the release tag v\$latest" >&2; return 1; }
-    if printf '%s' "$body" | grep -qE 'pull --ff-only'; then
-        echo "release upgrade must not pull the branch tip (runs unreleased code as root)" >&2
-        return 1
+    local T g="git -c user.name=t -c user.email=t@t -c advice.detachedHead=false"
+    T=$(mktemp -d "${TMPDIR:-/tmp}/chati-upg.XXXXXX") || return 1
+    trap 'rm -rf "$T"' RETURN
+    mkdir -p "$T/origin" || return 1
+    ( cd "$T/origin" && git init -q -b main . && echo 1.0.0 > VERSION && $g add . && $g commit -qm v1 \
+        && $g tag v1.0.0 && $g tag v0.9.0 && echo 2.0.0 > VERSION && $g commit -qam v2 && $g tag -a v2.0.0 -m rel \
+        && echo 3.0.0 > VERSION && $g commit -qam "unreleased" ) || return 1
+    local rel; rel=$(git -C "$T/origin" rev-parse 'v2.0.0^{commit}')
+    git clone -q "$T/origin" "$T/a" && git -C "$T/a" reset -q --hard v1.0.0 || return 1
+    # A local tag that DIFFERS from the remote one: `git fetch --tags` dies on this
+    # ("would clobber existing tag"), which broke every upgrade on such a checkout.
+    git -C "$T/a" tag -f v0.9.0 "$rel" >/dev/null 2>&1
+    eval "$(awk '/^version_gt\(\) /' "$PROJECT_DIR/chati")"
+    eval "$(awk '/^chati_self_update\(\) \{/,/^}$/' "$PROJECT_DIR/chati")"
+    chati_latest_version() { printf '2.0.0'; }
+    local out
+    out=$(CHATI_DIR="$T/a" CHATI_VERSION="1.0.0" chati_self_update 2>&1) \
+        || { echo "upgrade failed with a clobbering local tag: $out" >&2; return 1; }
+    assert_eq "$(git -C "$T/a" rev-parse HEAD)" "$rel" "landed on the release tag, not main's tip" \
+        && assert_eq "$(cat "$T/a/VERSION")" "2.0.0" "release content installed" \
+        && assert_eq "$(git -C "$T/a" branch --show-current)" "main" "stayed on the branch" \
+        && assert_match "$out" "1.0.0 → 2.0.0" "announces both versions" || return 1
+    # A checkout with a local commit must be refused and left untouched.
+    git clone -q "$T/origin" "$T/b" && git -C "$T/b" reset -q --hard v1.0.0 || return 1
+    ( cd "$T/b" && echo x > mine && $g add mine && $g commit -qm local ) || return 1
+    local before; before=$(git -C "$T/b" rev-parse HEAD)
+    if out=$(CHATI_DIR="$T/b" CHATI_VERSION="1.0.0" chati_self_update 2>&1); then
+        echo "upgrade must refuse a checkout with local commits" >&2; return 1
     fi
-    # U1 hole: a dev checkout AHEAD of the tag must not be silently detached onto
-    # it; proceed only when HEAD is an ancestor of the release tag.
-    printf '%s' "$body" | grep -q 'merge-base --is-ancestor HEAD "v$latest"' \
-        || { echo "release upgrade must refuse a checkout ahead of the tag (U1)" >&2; return 1; }
+    assert_eq "$(git -C "$T/b" rev-parse HEAD)" "$before" "local commit left in place" \
+        && assert_match "$out" "commits not in release" "says why it refused" || return 1
+    unset -f chati_latest_version
 }
 run_test "release-mode upgrade pins the release tag, not main's tip (U1)" test_upgrade_release_pins_tag
+
+# bash 3.2 in a UTF-8 locale folds a multibyte character into the variable name
+# that precedes it: "$latest…" expanded to nothing and printed garbage ("→ ??").
+# Any variable followed directly by a non-ASCII byte must use braces.
+test_no_var_glued_to_multibyte() {
+    local hits
+    hits=$(LC_ALL=C grep -nE $'\\$[A-Za-z_][A-Za-z_0-9]*[\x80-\xff]' "$PROJECT_DIR/chati" "$PROJECT_DIR/lib_chat.sh" \
+        "$PROJECT_DIR/lib_web.sh" "$PROJECT_DIR/chati-common.sh" "$PROJECT_DIR/setup.sh" "$PROJECT_DIR"/ola_chat/ola* \
+        "$PROJECT_DIR/ola_chat/mola" "$PROJECT_DIR"/libexec/* 2>/dev/null)
+    if [[ -n "$hits" ]]; then
+        echo "variable glued to a multibyte character (use \${var}):" >&2; printf '%s\n' "$hits" >&2; return 1
+    fi
+}
+run_test "no \$var glued to a multibyte character (bash 3.2)" test_no_var_glued_to_multibyte
 
 # The VERSION file and chati's CHATI_VERSION must agree: the upgrade reads VERSION
 # for the "Pulled chati $newver" line, so a drift announces the wrong version (and

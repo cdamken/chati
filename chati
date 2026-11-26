@@ -62,7 +62,7 @@ chati_self_update() {
     if ! version_gt "$cur" "$latest"; then
         echo "✅ chati is up to date ($cur; latest release v$latest)."; return 0
     fi
-    echo "⬆️  Updating chati $cur → $latest…"
+    echo "⬆️  Updating chati ${cur} → ${latest}…"
     if ! git -C "$CHATI_DIR" rev-parse --git-dir >/dev/null 2>&1; then
         echo "chati: $CHATI_DIR isn't a git checkout — download the release:" >&2
         echo "   https://github.com/$CHATI_REPO/archive/refs/tags/v$latest.tar.gz" >&2
@@ -78,22 +78,28 @@ chati_self_update() {
     # Release mode: pin to the release TAG, not the branch tip. A plain
     # fast-forward pull of the branch advances to origin/main's HEAD, pulling
     # any commits pushed after the tag was cut, so the release tag must gate the
-    # CODE, not just whether to upgrade. Fetch tags and fast-forward to the exact
-    # released commit.
-    if ! git -C "$CHATI_DIR" fetch --quiet --tags origin 2>/dev/null; then
-        echo "chati: git fetch failed. Try:  git -C \"$CHATI_DIR\" fetch --tags origin" >&2
+    # CODE, not just whether to upgrade. Fetch ONLY the release tag and
+    # fast-forward to the exact released commit. Not `fetch --tags`: that fails
+    # the whole upgrade when any unrelated local tag differs from the remote one
+    # ("would clobber existing tag"). The tag is read from FETCH_HEAD and never
+    # written locally, so no local tag can get in the way.
+    if ! git -C "$CHATI_DIR" fetch --quiet --no-tags origin "refs/tags/v${latest}" 2>/dev/null; then
+        echo "chati: couldn't fetch release v${latest}. Try:  git -C \"$CHATI_DIR\" fetch origin refs/tags/v${latest}" >&2
         return 1
     fi
+    local target
+    target=$(git -C "$CHATI_DIR" rev-parse --verify --quiet 'FETCH_HEAD^{commit}') || {
+        echo "chati: release v${latest} did not resolve to a commit." >&2; return 1; }
     # Don't strand a checkout that has commits NOT in the release tag — a dev
     # checkout past the tag (e.g. the one feeding $PATH), or one sitting on an
     # unreleased main tip. Its working tree is clean, so the porcelain guard
     # misses it; moving to the tag would drop those commits from the running
     # code with no warning. Proceed only when HEAD is an ancestor of the tag
     # (cleanly behind it); otherwise refuse (U1).
-    if ! git -C "$CHATI_DIR" merge-base --is-ancestor HEAD "v$latest" 2>/dev/null; then
+    if ! git -C "$CHATI_DIR" merge-base --is-ancestor HEAD "$target" 2>/dev/null; then
         echo "chati: $CHATI_DIR has commits not in release v$latest;" >&2
         echo "   installing the tag would drop them from the running code. Review:" >&2
-        echo "   git -C \"$CHATI_DIR\" log --oneline v$latest..HEAD" >&2
+        echo "   git -C \"$CHATI_DIR\" log --oneline ${target:0:12}..HEAD" >&2
         echo "   Push or branch them first." >&2
         return 1
     fi
@@ -101,9 +107,9 @@ chati_self_update() {
     # a fast-forward is possible, and this keeps a checkout that was ON a branch
     # on that branch (now pointing at the tag), so a later commit doesn't land
     # off-branch. Advances a detached HEAD just the same.
-    if ! git -C "$CHATI_DIR" merge --ff-only --quiet "v$latest" 2>/dev/null; then
+    if ! git -C "$CHATI_DIR" merge --ff-only --quiet "$target" 2>/dev/null; then
         echo "chati: couldn't fast-forward to release v$latest." >&2
-        echo "   Do it by hand:  git -C \"$CHATI_DIR\" fetch --tags origin && git -C \"$CHATI_DIR\" merge --ff-only v$latest" >&2
+        echo "   Do it by hand:  git -C \"$CHATI_DIR\" fetch origin refs/tags/v${latest} && git -C \"$CHATI_DIR\" merge --ff-only FETCH_HEAD" >&2
         return 1
     fi
     after=$(git -C "$CHATI_DIR" rev-parse HEAD 2>/dev/null)
