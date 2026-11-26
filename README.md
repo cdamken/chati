@@ -35,7 +35,7 @@ cd ~/chati
 - 🌐 **Browser UI:** already running at **http://127.0.0.1:8888**
 - 🔎 **Web search:** local SearXNG is running and wired in — toggle it inside chati with `/web`
 
-> The installer **detects your Mac's memory and picks a model that fits**: **≥32 GB → `gemma4:26b`** (~17 GB, the active default) **and also pulls `gemma4:31b`** (~19 GB, dense/max-quality) as a second option; 16–31 GB → `llama3.1:8b-instruct-q8_0`; <16 GB → `gemma3:4b`. Force a single model with `./setup.sh --model NAME`, or switch live in chati with `/model`.
+> The installer **detects your Mac's memory and picks a model that fits**: **≥32 GB → `gemma4:26b-a4b-it-qat`** (~15 GB, the active default) **and also pulls `gemma4:31b`** (~19 GB, dense/max-quality) as a second option; 16–31 GB → `llama3.1:8b-instruct-q8_0`; <16 GB → `gemma3:4b`. Force a single model with `./setup.sh --model NAME`, or switch live in chati with `/model`.
 >
 > **CLI only?** `./setup.sh --minimal` skips the browser app and SearXNG. **Undo everything?** `./setup.sh --remove-all` (see [Uninstalling](#uninstalling-remove-all)).
 >
@@ -160,11 +160,11 @@ chati
 >
 > | Unified RAM | Model(s) pulled | Size |
 > |---|---|---|
-> | ≥ 32 GB | `gemma4:26b` (active) **+** `gemma4:31b` | ~17 GB + ~19 GB |
+> | ≥ 32 GB | `gemma4:26b-a4b-it-qat` (active) **+** `gemma4:31b` | ~15 GB + ~19 GB |
 > | 16–31 GB | `llama3.1:8b-instruct-q8_0` | ~8.5 GB |
 > | < 16 GB | `gemma3:4b` | ~3.3 GB |
 >
-> On a ≥32 GB Mac both Gemma 4 models are pulled: `gemma4:26b` (MoE, fast, the active default) and `gemma4:31b` (dense, highest quality) — switch between them with `/model`.
+> On a ≥32 GB Mac both Gemma 4 models are pulled: `gemma4:26b-a4b-it-qat` (MoE, quantization-aware trained, fast, the active default) and `gemma4:31b` (dense, highest quality) — switch between them with `/model`.
 >
 > Force a specific model with `./setup.sh --model NAME` (e.g. `llama3.3:70b` on a high-RAM Mac). If the configured model isn't installed (e.g. after switching machines), chati **auto-falls-back** to an installed model instead of failing every message — pick any model anytime with `/model`. For a faster `/web` triage router, also pull a small model: `ollama pull llama3.2:3b`.
 >
@@ -364,7 +364,7 @@ near-instant while keeping a big model for the final answer.
 | Variable                  | Default                       | Purpose                                                       |
 |---------------------------|-------------------------------|---------------------------------------------------------------|
 | `OLLAMA_API`              | `http://localhost:11434`      | Ollama HTTP endpoint                                          |
-| `DEFAULT_MODEL`           | `gemma4:26b`                  | Fallback model when no `.active_ollama_model.txt` is set yet  |
+| `DEFAULT_MODEL`           | `gemma4:26b-a4b-it-qat`                  | Fallback model when no `.active_ollama_model.txt` is set yet  |
 | `OLA_CURL_TIMEOUT`        | `600`                         | Streaming chat timeout (seconds)                              |
 | `OLA_CURL_META_TIMEOUT`   | `60`                          | Background meta calls (autorename, compress)                  |
 | `COMPRESS_EVERY`          | `20`                          | Auto-compress memory every N new messages                     |

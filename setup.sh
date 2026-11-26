@@ -26,7 +26,7 @@ BREWFILE="$REPO_ROOT/installer/Brewfile"
 
 # Fallback chat model if memory detection fails. Normally the model is chosen
 # from the Mac's unified memory (recommend_model). Override with --model NAME.
-DEFAULT_CHAT_MODEL="gemma4:26b"
+DEFAULT_CHAT_MODEL="gemma4:26b-a4b-it-qat"
 SEARXNG_LOCAL_URL="http://127.0.0.1:8890"
 
 # Install everything by default; flags only subtract or tweak.
@@ -49,13 +49,13 @@ WANT_EXTRA_MODELS=1              # pull the big general models by default (--no-
 FORCE_MODELS=0                   # 1 for --force-models: pull the big models even on a low-RAM box
 
 # Detect unified memory (GB) and pick a model that fits. Apple Silicon shares
-# RAM between CPU and GPU, so the model must leave room for the OS. gemma4:26b
-# (~17 GB) is the target on any Mac that can hold it (>=32 GB); smaller Macs
+# RAM between CPU and GPU, so the model must leave room for the OS. gemma4:26b-a4b-it-qat
+# (~15 GB) is the target on any Mac that can hold it (>=32 GB); smaller Macs
 # get progressively lighter models so setup never picks something that won't run.
 detect_ram_gb() { echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )); }
 recommend_model() {
     local gb="$1"
-    if   (( gb >= 32 )); then echo "gemma4:26b"                  # ~17 GB — the default target
+    if   (( gb >= 32 )); then echo "gemma4:26b-a4b-it-qat"                  # ~15 GB — the default target
     elif (( gb >= 16 )); then echo "llama3.1:8b-instruct-q8_0"   # ~8.5 GB — fast, fits comfortably
     elif (( gb >=  1 )); then echo "gemma3:4b"                   # ~3.3 GB — lightweight
     else                      echo "$DEFAULT_CHAT_MODEL"; fi     # detection failed → fallback
@@ -68,11 +68,11 @@ recommend_model() {
 #   bge-m3       — RAG embedding model. Always ensured: it is tiny (~1.2 GB) and
 #                  broadly useful, so every install has it.
 #   gemma4:31b   — dense, max-quality general model (the "judge").
-#   gemma4:26b   — faster MoE alternative.
+#   gemma4:26b-a4b-it-qat   — faster MoE alternative.
 #
 # The two gemma4 give every machine the SAME pair of general models, so a
 # multi-host pool can route work to any box and get comparable output. They are
-# ~37 GB together, on by default (want=1). They are skipped when opted out
+# ~34 GB together, on by default (want=1). They are skipped when opted out
 # (want=0) OR when the box lacks the RAM to actually run a ~19 GB model
 # (< BIG_MODELS_MIN_GB), unless forced. A model that can't load is pure wasted
 # disk, so the RAM guard protects small boxes without changing the default on a
@@ -84,7 +84,7 @@ BIG_MODELS_MIN_GB=24
 select_extra_models() {  # $1=ram_gb  $2=want_big(0/1)  $3=force(0/1)
     local ram="$1" want="$2" force="$3" out="bge-m3"
     if [[ "$want" -eq 1 ]] && { (( ram >= BIG_MODELS_MIN_GB )) || [[ "$force" -eq 1 ]]; }; then
-        out="$out gemma4:31b gemma4:26b"
+        out="$out gemma4:31b gemma4:26b-a4b-it-qat"
     fi
     printf '%s' "$out"
 }
@@ -117,7 +117,7 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
   ./setup.sh --model NAME    force a chat model, skipping the memory-based pick
   ./setup.sh --no-pull       do not pull a model (assume one already exists)
   ./setup.sh --no-extra-models  pull ONLY bge-m3 alongside the chat model; skip
-                             the two big gemma4 models (~37 GB)
+                             the two big gemma4 models (~34 GB)
   ./setup.sh --force-models  pull the big gemma4 models even on a low-RAM box
   ./setup.sh --update        re-apply over an existing install, respecting its
                              profile (touches OpenWebUI/SearXNG only if already
@@ -128,10 +128,10 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
                              wedged UI). Ollama, models, chati, SearXNG untouched.
   ./setup.sh --remove-searxng uninstall ONLY the local SearXNG. Everything else kept.
 
-The chat model is chosen from unified memory: >=32 GB -> gemma4:26b (~17 GB),
+The chat model is chosen from unified memory: >=32 GB -> gemma4:26b-a4b-it-qat (~15 GB),
 16-31 -> llama3.1:8b-instruct-q8_0 (~8.5 GB), <16 -> gemma3:4b (~3.3 GB).
 By default setup also ensures three shared models so every machine matches:
-gemma4:31b + gemma4:26b (general models, ~37 GB total) and bge-m3 (RAG
+gemma4:31b + gemma4:26b-a4b-it-qat (general models, ~34 GB total) and bge-m3 (RAG
 embeddings, ~1.2 GB). The two gemma4 are auto-skipped below 24 GB RAM (a ~19 GB
 model needs headroom); bge-m3 is always pulled. Use --no-extra-models for
 bge-m3 only, or --force-models to pull them on a small box anyway.
@@ -553,7 +553,7 @@ fi
 # so every box in a multi-host pool runs the SAME models (see select_extra_models).
 EXTRA_MODELS="$(select_extra_models "$RAM_GB" "$WANT_EXTRA_MODELS" "$FORCE_MODELS")"
 if [[ "$EXTRA_MODELS" == *gemma4* ]]; then
-    warn "Will also ensure: $EXTRA_MODELS (the two gemma4 are ~37 GB together — skip with --no-extra-models)."
+    warn "Will also ensure: $EXTRA_MODELS (the two gemma4 are ~34 GB together — skip with --no-extra-models)."
 elif [[ "$WANT_EXTRA_MODELS" -eq 1 ]]; then
     warn "Only ${RAM_GB} GB RAM: skipping the big gemma4 models (a ~19 GB model needs ≥ ${BIG_MODELS_MIN_GB} GB). Ensuring: $EXTRA_MODELS. Force with --force-models."
 else
@@ -699,7 +699,7 @@ fi
 cat <<EOF
 Service status:          chati --status
 Stop everything:         chati --stop
-Shared models:           gemma4:31b + gemma4:26b + bge-m3 (default; --no-extra-models to skip)
+Shared models:           gemma4:31b + gemma4:26b-a4b-it-qat + bge-m3 (default; --no-extra-models to skip)
 /web helpers:            llama3.2:3b (route) + llama3.1:8b (queries) — auto-pulled
 Uninstall everything:    ./setup.sh --remove-all
 EOF

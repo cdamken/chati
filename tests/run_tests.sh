@@ -897,7 +897,7 @@ test_select_extra_models_default_big_box() {
     local out; out=$(select_extra_models 32 1 0)
     assert_match "$out" "bge-m3" "bge-m3 always present" \
         && assert_match "$out" "gemma4:31b" "31b on a 32 GB box" \
-        && assert_match "$out" "gemma4:26b" "26b on a 32 GB box"
+        && assert_match "$out" "gemma4:26b-a4b-it-qat" "26b qat on a 32 GB box"
 }
 run_test "select_extra_models: ≥24 GB default → bge-m3 + both gemma4" test_select_extra_models_default_big_box
 

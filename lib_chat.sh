@@ -255,7 +255,7 @@ ollama_endpoints_status() {
 }
 # Single source of truth for the default model. Override via the env if
 # you want a different fallback when no $ACTIVE_MODEL_FILE exists yet.
-export DEFAULT_MODEL="${DEFAULT_MODEL:-gemma4:26b}"
+export DEFAULT_MODEL="${DEFAULT_MODEL:-gemma4:26b-a4b-it-qat}"
 
 # --- BACKEND INTEROP ---
 # Where ola writes the final response so chati can read it without

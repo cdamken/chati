@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.6] - 2026-11-26
+
+### Changed
+- **The default chat model is now `gemma4:26b-a4b-it-qat`** (~15 GB) instead of
+  `gemma4:26b` (~17 GB). This is what a fresh install selects on a Mac with
+  32 GB or more, what `DEFAULT_MODEL` falls back to when no model has been
+  chosen yet, and the second of the two shared general models pulled next to
+  `gemma4:31b`. An existing install keeps the model you already picked;
+  nothing is removed. Force another one with `./setup.sh --model NAME`.
+
 ## [1.38.5] - 2026-11-26
 
 ### Security
