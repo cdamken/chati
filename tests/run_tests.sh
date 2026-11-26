@@ -264,6 +264,35 @@ test_update_applies_setup() {
 }
 run_test "chati --update applies setup, idempotently (#70 follow-up)" test_update_applies_setup
 
+# `chati --upgrade` runs `setup.sh --update`. That is a CODE update: it must not
+# upgrade Homebrew packages, SearXNG or OpenWebUI, nor start services, unless
+# the user opts in with --services. (It once moved OpenWebUI two minor versions
+# and started it as a side effect of a one-line chati release.)
+test_update_leaves_services_alone() {
+    local setup="$PROJECT_DIR/setup.sh" snippet
+    snippet=$(awk '/^APPLY_SERVICES=1$/,/APPLY_SERVICES=0; fi$/' "$setup")
+    [[ -n "$snippet" ]] || { echo "APPLY_SERVICES derivation not found" >&2; return 1; }
+    local r
+    r=$(UPDATE_MODE=1 WITH_SERVICES=0; eval "$snippet"; echo "$APPLY_SERVICES")
+    assert_eq "$r" "0" "plain --update leaves the stack alone" || return 1
+    r=$(UPDATE_MODE=1 WITH_SERVICES=1; eval "$snippet"; echo "$APPLY_SERVICES")
+    assert_eq "$r" "1" "--update --services opts in" || return 1
+    r=$(UPDATE_MODE=0 WITH_SERVICES=0; eval "$snippet"; echo "$APPLY_SERVICES")
+    assert_eq "$r" "1" "a normal install is unchanged" || return 1
+    # Every third-party step is gated on it.
+    grep -q '"$WANT_WEBUI" -eq 1 && "$APPLY_SERVICES" -eq 1' "$setup" \
+        || { echo "OpenWebUI install/start must be gated on APPLY_SERVICES" >&2; return 1; }
+    grep -q '"$WANT_SEARXNG" -eq 1 && "$APPLY_SERVICES" -eq 1' "$setup" \
+        || { echo "SearXNG install/start must be gated on APPLY_SERVICES" >&2; return 1; }
+    grep -q 'brew bundle install --no-upgrade' "$setup" \
+        || { echo "--update must not upgrade Homebrew packages" >&2; return 1; }
+    grep -q '"$APPLY_SERVICES" -eq 0 && "$WANT_PULL" -eq 0' "$setup" \
+        || { echo "--update must not start Ollama" >&2; return 1; }
+    local out; out=$(./setup.sh --help 2>&1) || return 1
+    assert_match "$out" "update --services" "setup --update --services in help"
+}
+run_test "chati --upgrade is a code update: it leaves the third-party stack alone" test_update_leaves_services_alone
+
 test_no_retired_ailocal_hints() {
     cd "$PROJECT_DIR" || return 1
     # 'ailocal' is the pre-1.36 name and is gone. It may only appear in setup.sh's
@@ -1525,6 +1554,7 @@ test_version_gt() {
 run_test "version_gt compares versions numerically (self-update)" test_version_gt
 
 # --- OpenWebUI login-less persistence (libexec/chati-webui resolve_webui_auth) ---
+eval "$(awk '/^webui_db_is_loginless\(\) \{/,/^}$/' "$PROJECT_DIR/libexec/chati-webui")"
 eval "$(awk '/^resolve_webui_auth\(\) \{/,/^}$/' "$PROJECT_DIR/libexec/chati-webui")"
 test_webui_auth_persists_loginless() {
     local dir="$SANDBOX/webui_auth"; rm -rf "$dir"; mkdir -p "$dir"
@@ -1556,6 +1586,37 @@ test_webui_auth_persists_loginless() {
     return 0
 }
 run_test "OpenWebUI stays login-less across reboots via marker (#6)" test_webui_auth_persists_loginless
+
+# A login-less DB whose marker is missing (created before the marker existed)
+# must stay login-less: booting it with auth shows a login form for the
+# built-in admin@localhost account, which has no password anyone knows.
+test_webui_auth_detects_loginless_db() {
+    command -v sqlite3 >/dev/null 2>&1 || { echo "skip: no sqlite3"; return 0; }
+    local dir="$SANDBOX/webui_auth_db"; rm -rf "$dir"; mkdir -p "$dir"
+    local db="$dir/webui.db" marker="$dir/.loginless"
+    sqlite3 "$db" "create table user(id text, name text, email text, role text);
+                   insert into user values('1','User','admin@localhost','admin');"
+    unset WEBUI_AUTH
+    resolve_webui_auth "$db" "$marker" >/dev/null 2>&1
+    assert_eq "${WEBUI_AUTH:-}" "False" "login-less DB without marker stays login-less" || return 1
+    [[ -f "$marker" ]] || { echo "should remember it with the marker" >&2; return 1; }
+
+    # A DB with a real account keeps its own auth: never forced login-less.
+    rm -f "$marker" "$db"; unset WEBUI_AUTH
+    sqlite3 "$db" "create table user(id text, name text, email text, role text);
+                   insert into user values('1','Ana','ana@example.com','admin');"
+    resolve_webui_auth "$db" "$marker" >/dev/null 2>&1
+    [[ -z "${WEBUI_AUTH:-}" ]] || { echo "real-account DB must keep its auth, got '$WEBUI_AUTH'" >&2; return 1; }
+    [[ ! -f "$marker" ]] || { echo "real-account DB must not get a marker" >&2; return 1; }
+
+    # Built-in account plus a real one: still a real-auth DB.
+    sqlite3 "$db" "insert into user values('2','User','admin@localhost','admin');"
+    resolve_webui_auth "$db" "$marker" >/dev/null 2>&1
+    [[ -z "${WEBUI_AUTH:-}" ]] || { echo "mixed DB must keep its auth" >&2; return 1; }
+    unset WEBUI_AUTH
+    return 0
+}
+run_test "OpenWebUI: a login-less DB with no marker is not locked behind a login" test_webui_auth_detects_loginless_db
 
 # --- web_query_needs_search router (failure-safe default) ---
 test_router_defaults_to_search() {

@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.7] - 2026-11-26
+
+### Fixed
+- **`chati --upgrade` no longer upgrades or starts the third-party stack.** It
+  re-ran the whole installer, so a one-line chati release also upgraded
+  Homebrew packages, pulled a new SearXNG, moved OpenWebUI to the newest PyPI
+  release (with its database migration) and started both services. A code
+  update now leaves Homebrew package versions, Ollama, models, SearXNG and
+  OpenWebUI exactly as they are. To update those too, on purpose:
+  `./setup.sh --update --services`.
+- **OpenWebUI opened on a login form for an account nobody can use.** A
+  login-less database created before the `.loginless` marker existed was
+  booted with authentication on, asking for the password of the built-in
+  `admin@localhost` account. Such a database (that account and no other) is
+  now recognised and kept login-less. A database with a real account keeps
+  its own authentication, as before.
+
 ## [1.38.6] - 2026-11-26
 
 ### Changed

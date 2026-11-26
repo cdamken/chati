@@ -73,6 +73,21 @@ find_webui_db() {
 # marker beside the DB. Precedence: explicit WEBUI_AUTH wins; else a fresh DB is
 # login-less (and remembered); else our own marker keeps it login-less; else a
 # pre-existing DB keeps its own auth. $1 = live db path ("" if none), $2 = marker.
+# 0 when the DB's only account is OpenWebUI's built-in login-less admin
+# (admin@localhost), i.e. the DB was created with WEBUI_AUTH=False. Such a DB
+# has no password anyone knows: booting it WITH auth shows a login form for an
+# account nobody can sign in to. Read-only; any doubt (no sqlite3, unreadable
+# DB, more than one account) answers "no".
+webui_db_is_loginless() {
+    local db="$1" n e
+    [[ -n "$db" && -f "$db" ]] || return 1
+    command -v sqlite3 >/dev/null 2>&1 || return 1
+    n=$(sqlite3 -readonly "$db" "select count(*) from user;" 2>/dev/null) || return 1
+    [[ "$n" == "1" ]] || return 1
+    e=$(sqlite3 -readonly "$db" "select email from user;" 2>/dev/null) || return 1
+    [[ "$e" == "admin@localhost" ]]
+}
+
 resolve_webui_auth() {
     local webui_db="$1" marker="$2" marker_dir
     marker_dir="$(dirname "$marker")"
@@ -88,6 +103,13 @@ resolve_webui_auth() {
         mkdir -p "$marker_dir" 2>/dev/null; : > "$marker" 2>/dev/null
     elif [[ -f "$marker" ]]; then
         export WEBUI_AUTH="False"
+    elif webui_db_is_loginless "$webui_db"; then
+        # A login-less DB from before the marker existed (or whose marker was
+        # lost): keep it login-less and remember it, instead of locking the
+        # user out behind a login form for an account with no known password.
+        export WEBUI_AUTH="False"
+        mkdir -p "$marker_dir" 2>/dev/null; : > "$marker" 2>/dev/null
+        echo "ℹ️  This OpenWebUI database is login-less (only the built-in local account) — keeping it login-less." >&2
     else
         echo "ℹ️  Existing OpenWebUI database detected — keeping its own auth setting." >&2
         echo "    (Force login-less with WEBUI_AUTH=False, or wipe it: ./setup.sh --remove-webui)" >&2

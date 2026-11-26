@@ -42,6 +42,7 @@ CLIENT_HOST=""                   # optional remote Ollama host given after the f
 CLIENT_SEARXNG=""                # optional remote SearXNG URL (--searxng) for /web
 ASSUME_YES=0
 UPDATE_MODE=0                    # 1 for --update: re-apply respecting the installed profile
+WITH_SERVICES=0                  # 1 for --services: with --update, ALSO upgrade/start the third-party stack
 FORCE_WEBUI=0                    # 1 for --force-webui: reinstall the OpenWebUI venv from scratch
 MODEL_EXPLICIT=0                 # set to 1 when the user forces --model
 CHAT_MODEL="$DEFAULT_CHAT_MODEL"
@@ -119,6 +120,9 @@ the OpenWebUI browser app, and a local SearXNG for /web — all started.
   ./setup.sh --no-extra-models  pull ONLY bge-m3 alongside the chat model; skip
                              the two big gemma4 models (~34 GB)
   ./setup.sh --force-models  pull the big gemma4 models even on a low-RAM box
+  ./setup.sh --update --services   same, and ALSO upgrade Homebrew packages, SearXNG
+                             and OpenWebUI and start them (a plain --update, which
+                             is what `chati --upgrade` runs, leaves all of that alone)
   ./setup.sh --update        re-apply over an existing install, respecting its
                              profile (touches OpenWebUI/SearXNG only if already
                              installed; no heavy reinstalls). Run by `chati --upgrade`.
@@ -159,6 +163,7 @@ while [[ $# -gt 0 ]]; do
         --no-extra-models) WANT_EXTRA_MODELS=0 ;; # skip the big gemma4 pair (still pulls bge-m3)
         --force-models)    FORCE_MODELS=1 ;;      # pull the big models even on a low-RAM box
         --update)    UPDATE_MODE=1 ;;   # re-apply over an existing install (used by `chati --upgrade`)
+        --services)  WITH_SERVICES=1 ;; # with --update: also upgrade Homebrew pkgs/SearXNG/OpenWebUI and start them
         --force-webui) FORCE_WEBUI=1 ;; # force a clean OpenWebUI venv reinstall
         --model)     CHAT_MODEL="${2:?--model needs a model name}"; MODEL_EXPLICIT=1; shift ;;
         --client)    CLIENT_ONLY=1; CLIENT_MODE="full"
@@ -193,6 +198,15 @@ if [[ "$UPDATE_MODE" -eq 1 ]]; then
     # explicit `--update --model X` still pulls that one model.
     [[ "$MODEL_EXPLICIT" -eq 1 ]] || WANT_PULL=0
 fi
+
+# A code update is NOT a stack update. `chati --upgrade` exists to install new
+# chati code; it must not, as a side effect, upgrade Homebrew packages, pull a
+# new SearXNG, move OpenWebUI to whatever PyPI published that day (a DB
+# migration the user never asked for), or START services that were not running.
+# So in --update mode the third-party stack is left exactly as it is, unless
+# the user opts in with --services. A normal install (no --update) is unchanged.
+APPLY_SERVICES=1
+if [[ "$UPDATE_MODE" -eq 1 && "$WITH_SERVICES" -eq 0 ]]; then APPLY_SERVICES=0; fi
 
 # ---- Uninstall path (--remove-all) ------------------------------------------
 # Tears down everything setup.sh creates, so an install can be tested and
@@ -471,8 +485,15 @@ if [[ "$CLIENT_ONLY" -eq 1 ]]; then client_install; fi
 # Single source of truth = installer/Brewfile. No second package list to drift.
 step "Installing Homebrew packages (from installer/Brewfile)"
 [[ -f "$BREWFILE" ]] || die "Brewfile missing at $BREWFILE — is the checkout complete?"
-brew bundle --file="$BREWFILE"
-ok "Packages installed / up to date"
+if [[ "$APPLY_SERVICES" -eq 1 ]]; then
+    brew bundle --file="$BREWFILE"
+    ok "Packages installed / up to date"
+else
+    # Install what a new chati version may need, but never upgrade what is
+    # already there (and skip Homebrew's own auto-update).
+    HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_BUNDLE_NO_UPGRADE=1 brew bundle install --no-upgrade --file="$BREWFILE"
+    ok "Packages present (installed ones left at their current version)"
+fi
 
 # ---- 4. Directories ----------------------------------------------------------
 step "Creating local directories"
@@ -524,6 +545,10 @@ fi
 # A model pull (and chati itself) needs the server up. Start it in the
 # background and wait until the API answers, so nothing downstream fails with
 # "could not connect to ollama server".
+if [[ "$APPLY_SERVICES" -eq 0 && "$WANT_PULL" -eq 0 ]]; then
+    step "Ollama and models"
+    ok "Left as they are (a code update does not start Ollama or change models)"
+else
 step "Starting Ollama service"
 ollama_up() { curl -fsS --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; }
 if ollama_up; then
@@ -613,6 +638,7 @@ else
         fi
     done
 fi
+fi  # end: Ollama + models (skipped on a plain --update)
 
 # ---- 8. SearXNG web search (default; skip with --no-searxng/--minimal) -------
 # Installed BEFORE OpenWebUI on purpose: OpenWebUI reads its web-search config
@@ -620,7 +646,7 @@ fi
 # starts for its "search via SearXNG" toggle to come up enabled. Wires chati's
 # /web too. NON-FATAL throughout — web search is a bonus, never fails setup.
 SEARXNG_STARTED=0
-if [[ "$WANT_SEARXNG" -eq 1 ]]; then
+if [[ "$WANT_SEARXNG" -eq 1 && "$APPLY_SERVICES" -eq 1 ]]; then
     step "Installing local SearXNG (powers /web)"
     if "$REPO_ROOT/installer/install_searxng.sh"; then
         ok "SearXNG installed"
@@ -654,7 +680,7 @@ fi
 # web search comes up enabled). The start is NON-FATAL: OpenWebUI's first boot
 # migrates its DB and can be slow, so a timeout must not abort setup.
 WEBUI_STARTED=0
-if [[ "$WANT_WEBUI" -eq 1 ]]; then
+if [[ "$WANT_WEBUI" -eq 1 && "$APPLY_SERVICES" -eq 1 ]]; then
     step "Installing OpenWebUI (browser UI)"
     # Idempotent by default: install_webui.sh runs `uv pip install --upgrade`,
     # which only downloads a new open-webui if PyPI has one and is a fast no-op
@@ -680,6 +706,17 @@ fi
 # ---- 10. Done ----------------------------------------------------------------
 # Descriptions go BEFORE the command so every trailing token is a clean,
 # copy-pasteable command (no trailing "# ..." to trip up zsh).
+if [[ "$APPLY_SERVICES" -eq 0 ]]; then
+    step "Third-party stack"
+    ok "Not touched: Homebrew package versions, Ollama, models, SearXNG, OpenWebUI"
+    echo "   Nothing was upgraded or started. To update those as well, on purpose:"
+    echo "     \"$REPO_ROOT/setup.sh\" --update --services"
+    echo
+    echo "$(printf '\033[1;32m')✅ chati code applied.$(printf '\033[0m')"
+    echo "Install log:             ${INSTALL_LOG:-$HOME/logs/chati_install_*.log}"
+    echo
+    exit 0
+fi
 cat <<EOF
 
 $(printf '\033[1;32m')✅ Setup complete!$(printf '\033[0m')
