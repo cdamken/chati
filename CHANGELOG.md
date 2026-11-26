@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.4] - 2026-11-26
+
+### Fixed
+- **`chati --upgrade` failed with "git fetch failed"** on a checkout where any
+  local tag differs from the remote one. The upgrade fetched every tag, and git
+  refuses the whole fetch in that case. It now fetches only the release tag it
+  is about to install.
+- **The upgrade message showed `→ ??`** instead of the target version.
+
+**If you are on 1.38.0 to 1.38.3 and the upgrade fails,** update once by hand
+and later upgrades work again:
+`git -C "$(dirname "$(readlink "$(command -v chati)")")" pull --ff-only`
+
 ## [1.38.3] - 2026-11-25
 
 ### Fixed
