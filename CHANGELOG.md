@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here tracks the **project/repo** as a whole. The `chati` CLI also
 carries its own internal version (shown by `chati --version`).
 
+## [1.38.5] - 2026-11-26
+
+### Security
+- **SearXNG credentials are sent only to `https://` endpoints.** `SEARXNG_USER`
+  / `SEARXNG_PASS` are one pair for the whole `SEARXNG_URLS` list, and they
+  were attached to every entry, including a plain-http local instance, which
+  put the password on the wire in clear text on each search and preflight.
+
+### Changed
+- Docs, examples and tests no longer name a real server: the SearXNG guide,
+  the "not configured" hint, `.env.example` and two tests use placeholders.
+
 ## [1.38.4] - 2026-11-26
 
 ### Fixed

@@ -111,8 +111,16 @@ format_search_results() {
 # local user via `ps`; a --config file (600 perms) keeps them off the
 # argv. Prints the temp file path when creds are set (caller passes
 # --config "$f" and rm's it right after the request), else nothing.
+#
+# $1 = the endpoint the request goes to. Credentials are only ever attached
+# to an https:// endpoint: SEARXNG_USER/PASS are one pair for the whole
+# SEARXNG_URLS list, and sending them to a plain-http entry (typically the
+# local instance, which needs none) would put the password on the wire in
+# clear text. No argument keeps the old "always" behaviour for callers that
+# have no endpoint at hand.
 searxng_auth_config() {
     [[ -n "${SEARXNG_USER:-}" && -n "${SEARXNG_PASS:-}" ]] || return 0
+    [[ $# -eq 0 || "$1" == https://* ]] || return 0
     local f
     f=$(mktemp) || return 0
     chmod 600 "$f"
@@ -166,7 +174,7 @@ searxng_mark_cooldown() { # $1=url
 _searxng_query_one() {
     local base="$1" query="$2"
     local timeout="${SEARXNG_TIMEOUT:-30}" max_chars="${MAX_WEB_CHARS:-6000}"
-    local auth_cfg; auth_cfg=$(searxng_auth_config)
+    local auth_cfg; auth_cfg=$(searxng_auth_config "$base")
     local -a auth=(); [[ -n "$auth_cfg" ]] && auth=(--config "$auth_cfg")
     local body http_code curl_rc
     body=$(mktemp) || { echo "Error: mktemp failed."; return 2; }
@@ -248,7 +256,7 @@ web_search_available() {
     local ok=0 code rc auth_cfg
     local -a auth
     for u in "${urls[@]}"; do
-        auth_cfg=$(searxng_auth_config)
+        auth_cfg=$(searxng_auth_config "$u")
         auth=(); [[ -n "$auth_cfg" ]] && auth=(--config "$auth_cfg")
         code=$(curl -s -o /dev/null --max-time "$timeout" --connect-timeout "${SEARXNG_CONNECT_TIMEOUT:-3}" "${auth[@]}" -G \
             --data-urlencode "q=ping" --data-urlencode "format=json" \
@@ -327,7 +335,7 @@ _web_search_once() {
     while IFS= read -r u; do urls+=("$u"); done < <(searxng_endpoints)
     if [[ ${#urls[@]} -eq 0 ]]; then
         echo "Error: SEARXNG_URLS / SEARXNG_URL is not configured. Set it in your .env, e.g.:"
-        echo "  export SEARXNG_URLS=\"http://localhost:8890, https://cloud.damken.com/searx\""
+        echo "  export SEARXNG_URLS=\"http://localhost:8890, https://searx.example.com\""
         return 0
     fi
 

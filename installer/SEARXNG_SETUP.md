@@ -17,7 +17,7 @@ chati (Mac)
    │
    │  HTTPS + Basic Auth
    ▼
-https://cloud.damken.com/searx
+https://searx.example.com
    │
    │  Apache reverse proxy
    ▼
@@ -38,14 +38,14 @@ firewall holes are needed.
 
 | Variable        | Required                  | Default                                    |
 |-----------------|---------------------------|--------------------------------------------|
-| `SEARXNG_URL`   | yes (defaults in lib_chat.sh) | `https://cloud.damken.com/searx`       |
+| `SEARXNG_URL`   | yes (defaults in lib_chat.sh) | `https://searx.example.com`       |
 | `SEARXNG_USER`  | yes if instance has auth  | unset                                      |
 | `SEARXNG_PASS`  | yes if instance has auth  | unset                                      |
 
 Put the credentials in `~/.zshrc` so every shell has them:
 
 ```bash
-export SEARXNG_USER=carlos
+export SEARXNG_USER=youruser
 export SEARXNG_PASS='<your-password>'
 ```
 
@@ -63,7 +63,7 @@ If you get a positive number, you're set.
 
 ## Server-side install (Ubuntu / Debian)
 
-These steps are what was done on `cloud.damken.com`. They assume:
+These steps are what was done on `your-server`. They assume:
 
 - Ubuntu 20.04+ with Apache 2 + Let's Encrypt SSL already running.
 - Apache modules `proxy`, `proxy_http`, `ssl`, `auth_basic`, `authn_file`,
@@ -118,7 +118,7 @@ sudo tee /etc/searxng/settings.yml > /dev/null <<EOF
 use_default_settings: true
 
 general:
-  instance_name: "damkencloud-searx"
+  instance_name: "my-searx"
   privacypolicy_url: false
   donation_url: false
   contact_url: false
@@ -127,7 +127,7 @@ general:
 server:
   bind_address: "127.0.0.1"
   port: 8889
-  base_url: "https://cloud.damken.com/searx/"
+  base_url: "https://searx.example.com/"
   secret_key: "$SECRET"
   limiter: false
   public_instance: false
@@ -204,14 +204,14 @@ Generate a strong password and store it for the Mac side:
 
 ```bash
 PASS=$(openssl rand -base64 24 | tr -d '=+/' | cut -c1-32)
-sudo htpasswd -bc /etc/apache2/searx.htpasswd carlos "$PASS"
+sudo htpasswd -bc /etc/apache2/searx.htpasswd youruser "$PASS"
 echo "Password (save this!): $PASS"
 ```
 
 ### 7. Apache reverse proxy
 
 Add this block to your SSL vhost **before** the catch-all
-`Alias / /var/www/owncloud/` line (on `cloud.damken.com` that lives in
+`Alias / /var/www/owncloud/` line (on `your-server` that lives in
 `/etc/apache2/sites-available/default-ssl.conf`):
 
 ```apache
@@ -237,8 +237,8 @@ sudo systemctl reload apache2
 End-to-end test from your Mac:
 
 ```bash
-curl -u 'carlos:<password>' \
-  'https://cloud.damken.com/searx/search?q=hello&format=json' \
+curl -u 'youruser:<password>' \
+  'https://searx.example.com/search?q=hello&format=json' \
   | jq '.results | length'
 ```
 
@@ -247,19 +247,19 @@ curl -u 'carlos:<password>' \
 ### Logs
 
 ```bash
-ssh -p 2222 carlos@cloud.damken.com 'sudo journalctl -u searxng -f'
+ssh youruser@your-server 'sudo journalctl -u searxng -f'
 ```
 
 ### Restart
 
 ```bash
-ssh -p 2222 carlos@cloud.damken.com 'sudo systemctl restart searxng'
+ssh youruser@your-server 'sudo systemctl restart searxng'
 ```
 
 ### Status / health
 
 ```bash
-ssh -p 2222 carlos@cloud.damken.com \
+ssh youruser@your-server \
   'sudo systemctl status searxng --no-pager; \
    curl -sf http://127.0.0.1:8889/healthz && echo " — healthz OK"'
 ```
@@ -267,7 +267,7 @@ ssh -p 2222 carlos@cloud.damken.com \
 ### Upgrade to latest SearXNG
 
 ```bash
-ssh -p 2222 carlos@cloud.damken.com '
+ssh youruser@your-server '
   cd /opt/searxng/searxng-repo &&
   sudo -u searxng git pull &&
   sudo -u searxng -- bash -c "
@@ -285,7 +285,7 @@ ssh -p 2222 carlos@cloud.damken.com '
 ### Rotate the Basic Auth password
 
 ```bash
-ssh -p 2222 carlos@cloud.damken.com 'sudo htpasswd /etc/apache2/searx.htpasswd carlos'
+ssh youruser@your-server 'sudo htpasswd /etc/apache2/searx.htpasswd youruser'
 # update ~/.zshrc on the Mac with the new value
 ```
 
@@ -295,7 +295,7 @@ A `.bak.<timestamp>` copy of `default-ssl.conf` was written before the
 `/searx` block was inserted. To revert:
 
 ```bash
-ssh -p 2222 carlos@cloud.damken.com '
+ssh youruser@your-server '
   ls /etc/apache2/sites-available/default-ssl.conf.bak.* | tail -1
   # sudo cp <that file> /etc/apache2/sites-available/default-ssl.conf
   # sudo systemctl reload apache2
@@ -318,7 +318,7 @@ ssh -p 2222 carlos@cloud.damken.com '
   EOL. `uv` is a single static binary, downloads pre-built CPython,
   no compile, no surprises.
 - **Path-based (`/searx`) instead of a subdomain**: matches the existing
-  pattern (`/carlos`, `/ren`, `/abordallo`) on this server. No new DNS
+  pattern (`/site-a`, `/site-b`) on this server. No new DNS
   records, no new Let's Encrypt cert.
 - **Basic Auth instead of OAuth/SSO**: simplest thing that works for one
   user with a rotating IP.

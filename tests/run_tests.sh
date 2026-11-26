@@ -953,9 +953,9 @@ run_test "searxng_auth_config writes a 0600 creds file (off argv)" test_searxng_
 test_searxng_local_endpoint_detection() {
     # Powers the /web auto-start: only a localhost endpoint can be started here.
     local r
-    r=$(SEARXNG_URLS="https://cloud.damken.com/searx" _searxng_local_endpoint)
+    r=$(SEARXNG_URLS="https://searx.example.com" _searxng_local_endpoint)
     assert_eq "$r" "" "remote-only config → nothing to start" || return 1
-    r=$(SEARXNG_URLS="https://cloud.damken.com/searx, http://localhost:8890" _searxng_local_endpoint)
+    r=$(SEARXNG_URLS="https://searx.example.com, http://localhost:8890" _searxng_local_endpoint)
     assert_eq "$r" "http://localhost:8890" "picks the localhost endpoint" || return 1
     r=$(SEARXNG_URLS="http://127.0.0.1:8890/" _searxng_local_endpoint)
     assert_eq "$r" "http://127.0.0.1:8890" "127.0.0.1 counts as local (slash trimmed)" || return 1
@@ -969,6 +969,22 @@ test_searxng_auth_config_empty_without_creds() {
     assert_eq "$f" "" "no creds → no config file"
 }
 run_test "searxng_auth_config yields nothing without creds" test_searxng_auth_config_empty_without_creds
+
+# Credentials must only ever reach an https endpoint: one user/pass pair
+# covers the whole SEARXNG_URLS list, so a plain-http entry (the local
+# instance) would otherwise receive the password in clear text.
+test_searxng_auth_config_https_only() {
+    local f
+    f=$(SEARXNG_USER=u SEARXNG_PASS=p searxng_auth_config "http://127.0.0.1:8890")
+    [[ -z "$f" ]] || { rm -f "$f"; echo "creds file built for an http endpoint"; return 1; }
+    f=$(SEARXNG_USER=u SEARXNG_PASS=p searxng_auth_config "http://remotebox:8890")
+    [[ -z "$f" ]] || { rm -f "$f"; echo "creds file built for a remote http endpoint"; return 1; }
+    f=$(SEARXNG_USER=u SEARXNG_PASS=p searxng_auth_config "https://searx.example.com")
+    [[ -n "$f" && -f "$f" ]] || { echo "no creds file for an https endpoint"; return 1; }
+    grep -q '^user = "u:p"$' "$f" || { rm -f "$f"; echo "wrong creds file content"; return 1; }
+    rm -f "$f"
+}
+run_test "searxng credentials go only to https endpoints" test_searxng_auth_config_https_only
 
 # --- CHATI_INSTANCE: per-instance active state for concurrent terminals ---
 # Re-source lib_chat.sh in clean subshells (state-file vars unset so the
